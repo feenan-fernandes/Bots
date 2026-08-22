@@ -1,0 +1,9 @@
+python-binance
+pandas
+numpy
+ta
+requests
+flask
+gunicorn
+python-dotenv
+pywebview

@@ -1,0 +1,17 @@
+# Secrets
+.env
+
+# Virtual environment
+venv/
+
+# Output data
+output/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/

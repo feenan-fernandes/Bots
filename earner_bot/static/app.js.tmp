@@ -1,0 +1,996 @@
+// DOM Elements
+const navDashboard = document.getElementById('nav-dashboard');
+const navSettings = document.getElementById('nav-settings');
+const navML = document.getElementById('nav-ml');
+const navLogout = document.getElementById('nav-logout');
+const viewDashboard = document.getElementById('view-dashboard');
+const viewSettings = document.getElementById('view-settings');
+
+const pageTitle = document.getElementById('page-title');
+const pageSubtitle = document.getElementById('page-subtitle');
+
+const sysPulse = document.getElementById('system-pulse');
+const sysStatusText = document.getElementById('system-status-text');
+const btnRefresh = document.getElementById('btn-refresh');
+const btnRun = document.getElementById('btn-run');
+const btnEmergency = document.getElementById('btn-emergency');
+const btnResume = document.getElementById('btn-resume');
+
+const toastEl = document.getElementById('toast');
+
+// Login Elements
+const loginOverlay = document.getElementById('login-overlay');
+const loginForm = document.getElementById('login-form');
+const loginPassphrase = document.getElementById('login_passphrase');
+const btnLogin = document.getElementById('btn-login');
+
+// Global Auth State
+let csrfToken = '';
+
+// Security: Initialize CSRF Token
+async function initCSRF() {
+    try {
+        const res = await fetch('/api/csrf', { cache: 'no-store' });
+        if (res.ok) {
+            const data = await res.json();
+            csrfToken = data.csrf_token;
+        }
+    } catch (e) {
+        console.error("Failed to load CSRF token.");
+    }
+}
+
+// Security: Secure Fetch Wrapper
+async function secureFetch(url, options = {}) {
+    if (!csrfToken) await initCSRF();
+    if (!options.headers) options.headers = {};
+    if (options.method && options.method !== 'GET') {
+        options.headers['X-CSRFToken'] = csrfToken;
+    }
+    
+    const res = await fetch(url, options);
+    
+    if (res.status === 401) {
+        // Unauthorized, show login overlay
+        loginOverlay.classList.add('active');
+        throw new Error("Unauthorized");
+    }
+    return res;
+}
+
+// Login Logic
+loginForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const passphrase = loginPassphrase.value;
+    
+    const btnText = btnLogin.querySelector('.btn-text');
+    const loader = document.getElementById('login-loader');
+    btnText.style.display = 'none';
+    loader.style.display = 'block';
+
+    try {
+        await initCSRF(); // Ensure fresh token before auth
+        const res = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify({ passphrase })
+        });
+        
+        if (res.ok) {
+            loginOverlay.classList.remove('active');
+            loginPassphrase.value = '';
+            showToast('Authenticated successfully.');
+            // Reload dashboard data
+            fetchStatus();
+            fetchChartData();
+        } else {
+            showToast('Invalid passphrase.');
+        }
+    } catch (err) {
+        showToast('Login error.');
+    } finally {
+        btnText.style.display = 'block';
+        loader.style.display = 'none';
+    }
+});
+
+// Logout Logic
+navLogout.addEventListener('click', async () => {
+    try {
+        await secureFetch('/api/logout', { method: 'POST' });
+        loginOverlay.classList.add('active');
+        showToast('Logged out.');
+    } catch (e) {
+        console.error("Logout failed", e);
+    }
+});
+
+// Navigation Logic
+navDashboard.addEventListener('click', () => {
+    navDashboard.classList.add('active');
+    navSettings.classList.remove('active');
+    if (navML) navML.classList.remove('active');
+    viewDashboard.classList.add('active');
+    viewSettings.classList.remove('active');
+    if (viewAnalytics) viewAnalytics.classList.remove('active');
+    pageTitle.textContent = 'Dashboard';
+    pageSubtitle.textContent = 'Real-time portfolio and strategy monitoring.';
+    fetchStatus();
+    fetchChartData();
+});
+
+navSettings.addEventListener('click', () => {
+    navSettings.classList.add('active');
+    navDashboard.classList.remove('active');
+    if (navML) navML.classList.remove('active');
+    viewSettings.classList.add('active');
+    viewDashboard.classList.remove('active');
+    if (viewAnalytics) viewAnalytics.classList.remove('active');
+    pageTitle.textContent = 'Settings';
+    pageSubtitle.textContent = 'Manage API keys and notification preferences.';
+    checkConfigStatus();
+});
+
+const viewAnalytics = document.getElementById('view-analytics');
+
+if (navML) {
+    navML.addEventListener('click', () => {
+        navML.classList.add('active');
+        navDashboard.classList.remove('active');
+        navSettings.classList.remove('active');
+        if (viewAnalytics) viewAnalytics.classList.add('active');
+        viewDashboard.classList.remove('active');
+        viewSettings.classList.remove('active');
+        pageTitle.textContent = 'Analytics';
+        pageSubtitle.textContent = 'Performance analytics, win rates, and equity curve.';
+        fetchAnalytics(); // Fetch data when opening tab
+    });
+}
+
+// Toast Utility
+function showToast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    setTimeout(() => toastEl.classList.remove('show'), 3000);
+}
+
+// Formatters
+const fmtCurrency = (val) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
+const fmtCrypto = (val) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 }).format(val);
+const fmtPct = (val) => (val > 0 ? '+' : '') + new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val) + '%';
+
+// --- Chart Logic ---
+let chart;
+let activeChartSymbol = 'BTCUSDT';
+let userSelectedChartSymbol = false;
+let activeChartInterval = '1h';
+
+function initChart() {
+    const container = document.querySelector('#chart-container');
+    if (!container) return;
+
+    const options = {
+        series: [],
+        chart: {
+            type: 'candlestick',
+            height: 320,
+            background: 'transparent',
+            toolbar: { show: false },
+            animations: { enabled: false }
+        },
+        theme: { mode: 'dark' },
+        plotOptions: {
+            candlestick: {
+                colors: { upward: '#00ff9d', downward: '#ff4d4d' },
+                wick: { useFillColor: true }
+            }
+        },
+        xaxis: {
+            type: 'datetime',
+            labels: { style: { colors: '#8b92a5' } },
+            axisBorder: { show: false },
+            axisTicks: { show: false }
+        },
+        yaxis: {
+            tooltip: { enabled: true },
+            labels: { 
+                style: { colors: '#8b92a5' },
+                formatter: (value) => { return value.toFixed(4); }
+            },
+            min: (min) => { return min * 0.99; },
+            max: (max) => { return max * 1.01; }
+        },
+        grid: {
+            borderColor: 'rgba(255,255,255,0.05)',
+            strokeDashArray: 4
+        },
+        stroke: {
+            curve: 'smooth',
+            width: [1, 2] // 1 for candles, 2 for line
+        }
+    };
+    
+    chart = new ApexCharts(container, options);
+    chart.render();
+}
+
+async function fetchChartData() {
+    if (!chart) return;
+    try {
+        const res = await secureFetch(`/api/chart?symbol=${activeChartSymbol}&interval=${activeChartInterval}`);
+        const json = await res.json();
+        
+        // Update Chart Title
+        const displaySym = activeChartSymbol.replace('USDT', '');
+        const chartTitle = document.getElementById('chart-title');
+        if (chartTitle) chartTitle.textContent = `Live Market View (${displaySym})`;
+        
+        if (json.status === 'success' && json.data) {
+            const candles = json.data.map(d => ({
+                x: d.time * 1000,
+                y: [d.open, d.high, d.low, d.close]
+            }));
+            
+            const ma = json.data.filter(d => d.ma25 !== null).map(d => ({
+                x: d.time * 1000,
+                y: d.ma25
+            }));
+            
+            chart.updateSeries([{
+                name: 'Candles',
+                type: 'candlestick',
+                data: candles
+            }, {
+                name: 'MA25',
+                type: 'line',
+                data: ma,
+                color: '#3498db'
+            }]);
+        }
+    } catch (e) {
+        if (e.message !== "Unauthorized") console.error("Failed to load chart data", e);
+    }
+}
+
+// Fetch Bot Status
+async function fetchStatus() {
+    try {
+        const [statusRes, healthRes] = await Promise.all([
+            secureFetch('/status'),
+            fetch('/health') // Unprotected endpoint
+        ]);
+        
+        const status = await statusRes.json();
+        const health = await healthRes.json();
+        
+        updateDashboard(status, health);
+    } catch (e) {
+        if (e.message !== "Unauthorized") {
+            sysPulse.classList.add('halted');
+            sysStatusText.textContent = 'Disconnected';
+        }
+    }
+}
+
+function updateDashboard(status, health) {
+    window.nextScanTime = status.next_scan_time || 0;
+    
+    // Update active chart symbol dynamically
+    if (!userSelectedChartSymbol) {
+        let newChartSymbol = activeChartSymbol;
+        if (status.open_trades && status.open_trades.length > 0) {
+            newChartSymbol = status.open_trades[0].symbol;
+        } else if (status.top_candidates && status.top_candidates.length > 0) {
+            newChartSymbol = status.top_candidates[0].symbol;
+        }
+        if (newChartSymbol !== activeChartSymbol) {
+            activeChartSymbol = newChartSymbol;
+            fetchChartData();
+        }
+    }
+    // Top Bar Status
+    const pmToggle = document.getElementById('paper_mode_toggle');
+    if (pmToggle && document.activeElement !== pmToggle) {
+        pmToggle.checked = health.paper_mode;
+    }
+
+    if (status.halted) {
+        sysPulse.classList.add('halted');
+        sysPulse.classList.remove('active');
+        sysStatusText.textContent = 'Bot Halted';
+        btnEmergency.style.display = 'none';
+        btnResume.style.display = 'inline-flex';
+    } else {
+        sysPulse.classList.remove('halted');
+        sysPulse.classList.add('active');
+        sysStatusText.textContent = health.paper_mode ? 'Autotrading Active (Paper)' : 'Autotrading Active (Live)';
+        btnEmergency.style.display = 'inline-flex';
+        btnResume.style.display = 'none';
+    }
+
+    // Metrics
+    document.getElementById('val-portfolio-aed').textContent = fmtCurrency(health.portfolio_aed);
+    document.getElementById('val-portfolio-usd').textContent = fmtCurrency(health.portfolio_aed / 3.6725);
+    
+    const pnlUsd = status.daily_stats.pnl_usd || 0;
+    const pnlAed = status.daily_stats.pnl_aed || 0;
+    const pnlEl = document.getElementById('val-daily-pnl');
+    pnlEl.innerHTML = `<span class="currency">AED</span> ${fmtCurrency(pnlAed)}`;
+    pnlEl.className = 'value ' + (pnlAed >= 0 ? 'pos' : 'neg');
+    document.getElementById('val-daily-pnl-usd').textContent = fmtCurrency(pnlUsd);
+
+    const trades = status.daily_stats.trades || 0;
+    const wins = status.daily_stats.wins || 0;
+    document.getElementById('val-win-rate').textContent = trades > 0 ? Math.round((wins / trades) * 100) + '%' : '0%';
+    document.getElementById('val-trades-count').textContent = `${trades} Trades Today`;
+
+    // Active Trades
+    const atContainer = document.getElementById('active-trade-container');
+    if (status.open_trades && status.open_trades.length > 0) {
+        let tableHTML = `<table class="styled-table" style="width: 100%; font-size: 0.85rem; text-align: left; border-collapse: collapse;">
+            <thead>
+                <tr>
+                    <th style="padding-bottom: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1);">Symbol</th>
+                    <th style="padding-bottom: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1);">Side</th>
+                    <th style="padding-bottom: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1);">Qty</th>
+                    <th style="padding-bottom: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1);">Entry Price</th>
+                    <th style="padding-bottom: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1);">Time (Local)</th>
+                    <th style="padding-bottom: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); color: var(--danger);">Stop Loss</th>
+                    <th style="padding-bottom: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); color: var(--success);">Take Profit</th>
+                </tr>
+            </thead>
+            <tbody>`;
+        
+        tableHTML += status.open_trades.map(t => {
+            const side = t.side || "LONG";
+            const sideColor = side === "LONG" ? "#00ff9d" : "#ff4d4d";
+            const rawTime = t.ts || t.entry_time;
+            const entryTime = rawTime ? new Date(rawTime).toLocaleTimeString() : 'Unknown';
+            return `
+                <tr>
+                    <td style="padding: 0.75rem 0; font-weight: 600;">${t.symbol}</td>
+                    <td style="padding: 0.75rem 0;">
+                        <span style="padding: 2px 6px; border-radius: 4px; background: ${sideColor}22; color: ${sideColor}; border: 1px solid ${sideColor}55; font-size: 0.75rem;">
+                            ${side}
+                        </span>
+                    </td>
+                    <td style="padding: 0.75rem 0; color: var(--text-muted);">${fmtCrypto(t.qty)}</td>
+                    <td style="padding: 0.75rem 0;">$${fmtCurrency(t.price)}</td>
+                    <td style="padding: 0.75rem 0; color: var(--text-muted); font-size: 0.75rem;">${entryTime}</td>
+                    <td style="padding: 0.75rem 0; color: var(--danger);">$${fmtCurrency(t.stop_loss)}</td>
+                    <td style="padding: 0.75rem 0; color: var(--success);">$${fmtCurrency(t.take_profit)}</td>
+                </tr>
+                <tr>
+                    <td colspan="7" style="padding: 0 0 1rem 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
+                        <div id="mini-chart-${t.symbol}" style="height: 100px; width: 100%;"></div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+        tableHTML += `</tbody></table>`;
+        atContainer.innerHTML = tableHTML;
+        
+        // Initialize mini charts
+        setTimeout(() => {
+            status.open_trades.forEach(async (t) => {
+                const container = document.getElementById(`mini-chart-${t.symbol}`);
+                if (!container || container.hasChildNodes()) return;
+                
+                const miniChart = LightweightCharts.createChart(container, {
+                    width: container.clientWidth,
+                    height: 100,
+                    layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#8892b0' },
+                    grid: { vertLines: { visible: false }, horzLines: { visible: false } },
+                    timeScale: { visible: false },
+                    rightPriceScale: { visible: false }
+                });
+                const lineSeries = miniChart.addLineSeries({ color: '#64ffda', lineWidth: 2 });
+                
+                try {
+                    const res = await secureFetch(`/api/chart?symbol=${t.symbol}&interval=5m`);
+                    const json = await res.json();
+                    if (json.status === 'success' && json.data) {
+                        const lineData = json.data.map(d => ({ x: d.time * 1000, y: d.close }));
+                        lineSeries.setData(lineData);
+                        miniChart.timeScale().fitContent();
+                    }
+                } catch (e) { console.error('Mini chart error:', e); }
+            });
+        }, 100);
+    } else {
+        atContainer.innerHTML = `
+            <div class="empty-state">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <p>No active positions.</p>
+            </div>
+        `;
+    }
+
+    // Trade History
+    const thList = document.getElementById('trade-history-list');
+    if (status.recent_trades && status.recent_trades.length > 0) {
+        thList.innerHTML = status.recent_trades.reverse().map(t => {
+            const entryTime = t.entry_time && t.entry_time !== "Unknown" ? new Date(t.entry_time).toLocaleTimeString() : 'Unknown';
+            const exitTime = t.exit_time ? new Date(t.exit_time).toLocaleTimeString() : 'Unknown';
+            const dateStr = t.exit_time ? t.exit_time.split('T')[0] : 'Unknown';
+            return `
+            <li class="trade-item">
+                <div class="t-info">
+                    <h4>${t.symbol || 'UNKNOWN'}</h4>
+                    <span>${dateStr} | ${t.regime}</span>
+                    <span style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-top: 2px;">
+                        In: ${entryTime} &rarr; Out: ${exitTime}
+                    </span>
+                </div>
+                <div class="t-pnl ${t.pnl_pct > 0 ? 'pos' : 'neg'}">
+                    ${fmtPct(t.pnl_pct)}
+                    <span>AED ${fmtCurrency(t.pnl_aed)}</span>
+                </div>
+            </li>
+            `;
+        }).join('');
+    } else {
+        thList.innerHTML = `<li class="empty-state" style="padding:1rem 0;font-size:0.9rem">No recent trades.</li>`;
+    }
+    
+    // Strategy Brain & Chart Title
+    if (status.last_analysis) {
+        const a = status.last_analysis;
+        
+        const regEl = document.getElementById('brain-regime');
+        regEl.textContent = a.regime || 'WAITING';
+        if (a.regime === 'BLACK_SWAN') regEl.style.color = 'var(--danger)';
+        else regEl.style.color = '';
+        
+        document.getElementById('brain-mtf').textContent = a.mtf || 'WAITING';
+        document.getElementById('brain-score').textContent = (a.score || 0).toString();
+        
+        let reasonMap = {
+            "no_mtf_confluence": "Timeframes disagree (1H/15m/5m mixed)",
+            "black_swan": "Extreme volatility detected",
+            "below_confluence_threshold": "Not enough indicators agree",
+            "mtf_direction_conflict": "Timeframes conflict with signal",
+            "no_signals": "Market is neutral (0 points)",
+            "duplicate": "Trade already taken recently",
+            "insufficient_data": "Waiting for more candle data"
+        };
+        
+        let sigText = a.signal || 'WAITING';
+        if (a.action === 'SKIP') {
+            let mappedReason = a.reason ? (reasonMap[a.reason] || a.reason) : "Neutral Market";
+            sigText += ` (SKIPPED: ${mappedReason})`;
+        }
+        document.getElementById('brain-signal').textContent = sigText;
+        
+        const blacklistEl = document.getElementById('brain-blacklist');
+        if (blacklistEl) {
+            let blText = status.blacklist_symbols || 'None';
+            if (blText !== 'None') {
+                blText = blText.split(',').map(s => s.trim().replace('USDT', '')).join(', ');
+            }
+            blacklistEl.textContent = blText;
+            blacklistEl.title = blText;
+            blacklistEl.style.maxWidth = '100%';
+            blacklistEl.style.overflow = 'visible';
+            blacklistEl.style.whiteSpace = 'normal';
+            blacklistEl.style.fontSize = '0.75rem';
+        }
+
+        const scanEl = document.getElementById('brain-scanning');
+        if (scanEl && status.scanned_symbols) {
+            const scanText = status.scanned_symbols.map(s => s.replace('USDT', '')).join(', ');
+            scanEl.textContent = scanText || 'None';
+            scanEl.title = scanText || 'None';
+            // Display the full list of scanning symbols
+            scanEl.style.maxWidth = '100%';
+            scanEl.style.overflow = 'visible';
+            scanEl.style.whiteSpace = 'normal';
+            scanEl.style.fontSize = '0.75rem';
+        }
+
+        const breakdownContainer = document.getElementById('brain-breakdown');
+        if (breakdownContainer && a.breakdown) {
+            breakdownContainer.innerHTML = '';
+            const keys = Object.keys(a.breakdown);
+            if (keys.length === 0) {
+                breakdownContainer.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 1rem 0;">No active indicators</div>';
+            } else {
+                keys.forEach(k => {
+                    const pts = a.breakdown[k];
+                    const row = document.createElement('div');
+                    row.style.display = 'flex';
+                    row.style.justifyContent = 'space-between';
+                    row.style.borderBottom = '1px solid rgba(255,255,255,0.02)';
+                    row.style.paddingBottom = '4px';
+                    
+                    const lbl = document.createElement('span');
+                    lbl.textContent = k.toUpperCase();
+                    lbl.style.color = 'var(--text-muted)';
+                    
+                    const val = document.createElement('span');
+                    val.textContent = `+${pts} pts`;
+                    val.style.fontWeight = '500';
+                    val.style.color = 'var(--primary)';
+                    
+                    row.appendChild(lbl);
+                    row.appendChild(val);
+                    breakdownContainer.appendChild(row);
+                });
+            }
+        }
+
+        if (a.ts) {
+            const diff = Math.floor((new Date() - new Date(a.ts)) / 1000);
+            let timeStr = diff < 60 ? `${diff}s ago` : `${Math.floor(diff/60)}m ago`;
+            document.getElementById('brain-scan').textContent = timeStr;
+        }
+        
+        // Render Top Candidates Table
+        const tbody = document.getElementById('top-candidates-body');
+        if (tbody && status.top_candidates) {
+            
+            const selectEl = document.getElementById('chart-symbol-select');
+            if (selectEl) {
+                const currentVal = selectEl.value;
+                const newSymbols = status.top_candidates.map(c => c.symbol);
+                if (newSymbols.length > 0) {
+                    selectEl.style.display = 'block';
+                    let changed = false;
+                    
+                    // Only update options if list changed to avoid focus loss
+                    if (selectEl.options.length !== newSymbols.length) {
+                        changed = true;
+                    } else {
+                        for (let i=0; i<newSymbols.length; i++) {
+                            if (selectEl.options[i].value !== newSymbols[i]) { changed = true; break; }
+                        }
+                    }
+                    
+                    if (changed) {
+                        selectEl.innerHTML = '';
+                        newSymbols.forEach(sym => {
+                            const opt = document.createElement('option');
+                            opt.value = sym;
+                            opt.textContent = sym.replace('USDT', '');
+                            selectEl.appendChild(opt);
+                        });
+                        
+                        if (currentVal && newSymbols.includes(currentVal)) {
+                            selectEl.value = currentVal;
+                        } else if (!currentVal || !newSymbols.includes(activeChartSymbol)) {
+                            activeChartSymbol = newSymbols[0];
+                            selectEl.value = newSymbols[0];
+                            fetchChartData();
+                        }
+                    }
+                }
+            }
+
+            tbody.innerHTML = '';
+            if (status.top_candidates.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding-top: 1rem; color: var(--text-muted);">No candidates evaluated</td></tr>';
+            } else {
+                status.top_candidates.forEach(c => {
+                    const tr = document.createElement('tr');
+                    tr.style.borderBottom = '1px solid rgba(255,255,255,0.02)';
+                    
+                    const tdSym = document.createElement('td');
+                    tdSym.style.padding = '0.5rem 0';
+                    tdSym.style.fontWeight = '500';
+                    tdSym.textContent = c.symbol.replace('USDT', '');
+                    
+                    const tdScore = document.createElement('td');
+                    tdScore.style.padding = '0.5rem 0';
+                    tdScore.style.fontWeight = 'bold';
+                    tdScore.style.color = c.score > 50 ? 'var(--primary)' : 'var(--text-muted)';
+                    tdScore.textContent = c.score;
+                    
+                    const tdMacd = document.createElement('td');
+                    tdMacd.style.padding = '0.5rem 0';
+                    tdMacd.textContent = (c.breakdown && c.breakdown.macd !== undefined) ? `+${c.breakdown.macd}` : '+0';
+                    
+                    const tdRsi = document.createElement('td');
+                    tdRsi.style.padding = '0.5rem 0';
+                    tdRsi.textContent = (c.breakdown && c.breakdown.rsi !== undefined) ? `+${c.breakdown.rsi}` : '+0';
+                    
+                    const tdVol = document.createElement('td');
+                    tdVol.style.padding = '0.5rem 0';
+                    tdVol.textContent = (c.breakdown && c.breakdown.volume !== undefined) ? `+${c.breakdown.volume}` : '+0';
+
+                    const tdBb = document.createElement('td');
+                    tdBb.style.padding = '0.5rem 0';
+                    tdBb.textContent = (c.breakdown && c.breakdown.bb !== undefined) ? `+${c.breakdown.bb}` : '+0';
+
+                    const tdZ = document.createElement('td');
+                    tdZ.style.padding = '0.5rem 0';
+                    tdZ.textContent = (c.breakdown && c.breakdown.zscore !== undefined) ? `+${c.breakdown.zscore}` : '+0';
+
+                    const tdStoch = document.createElement('td');
+                    tdStoch.style.padding = '0.5rem 0';
+                    tdStoch.textContent = (c.breakdown && c.breakdown.stochastic !== undefined) ? `+${c.breakdown.stochastic}` : '+0';
+
+                    const tdMa = document.createElement('td');
+                    tdMa.style.padding = '0.5rem 0';
+                    tdMa.textContent = (c.breakdown && c.breakdown.trend !== undefined) ? `+${c.breakdown.trend}` : '+0';
+                    
+                    tr.appendChild(tdSym);
+                    tr.appendChild(tdScore);
+                    tr.appendChild(tdMacd);
+                    tr.appendChild(tdRsi);
+                    tr.appendChild(tdVol);
+                    tr.appendChild(tdBb);
+                    tr.appendChild(tdZ);
+                    tr.appendChild(tdStoch);
+                    tr.appendChild(tdMa);
+                    tbody.appendChild(tr);
+                });
+            }
+        }
+    } else {
+        const chartTitle = document.getElementById('chart-title');
+        if (chartTitle) chartTitle.textContent = `Live Market View (Scanning...)`;
+    }
+}
+
+// Config Check
+async function checkConfigStatus() {
+    const alertEl = document.getElementById('config-status-alert');
+    const toggleEl = document.getElementById('paper_mode_toggle');
+    try {
+        const res = await secureFetch('/api/config');
+        const data = await res.json();
+        
+        if (data.paper_mode !== undefined && toggleEl) {
+            toggleEl.checked = data.paper_mode;
+        }
+
+        const futuresToggleEl = document.getElementById('settings-futures-toggle');
+        if (data.futures_mode !== undefined && futuresToggleEl) {
+            futuresToggleEl.checked = data.futures_mode;
+        }
+        
+        const blacklistEl = document.getElementById('blacklist_symbols');
+        if (data.blacklist_symbols !== undefined && blacklistEl) {
+            blacklistEl.value = data.blacklist_symbols;
+        }
+
+        // Handle Active/Saved Badges
+        if (data.configured_keys) {
+            const displayStyle = 'inline-block';
+            document.getElementById('badge-api').style.display = data.configured_keys.api ? displayStyle : 'none';
+            document.getElementById('badge-secret').style.display = data.configured_keys.secret ? displayStyle : 'none';
+            document.getElementById('badge-tg-token').style.display = data.configured_keys.telegram_token ? displayStyle : 'none';
+            document.getElementById('badge-tg-chat').style.display = data.configured_keys.telegram_chat_id ? displayStyle : 'none';
+        }
+
+        if (data.configured) {
+            alertEl.className = 'alert alert-success';
+            alertEl.textContent = '✅ API keys are configured and active.';
+        } else {
+            alertEl.className = 'alert alert-info';
+            alertEl.textContent = '⚠️ API keys missing or using placeholders. Please update them below.';
+        }
+    } catch (e) {
+        if (e.message !== "Unauthorized") console.error(e);
+    }
+}
+
+// Config Submit
+document.getElementById('config-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const key = document.getElementById('binance_api_key').value;
+    const sec = document.getElementById('binance_secret').value;
+    const tg = document.getElementById('telegram_token').value;
+    const tgc = document.getElementById('telegram_chat_id').value;
+    const blacklist = document.getElementById('blacklist_symbols').value;
+    const pm = document.getElementById('paper_mode_toggle');
+    const fm = document.getElementById('settings-futures-toggle');
+    
+    const payload = {};
+    if (key) payload.binance_api_key = key;
+    if (sec) payload.binance_secret = sec;
+    if (tg) payload.telegram_token = tg;
+    if (tgc) payload.telegram_chat_id = tgc;
+    if (blacklist !== undefined) payload.blacklist_symbols = blacklist;
+    if (pm) payload.paper_mode = pm.checked;
+    if (fm) payload.futures_mode = fm.checked;
+
+    if (Object.keys(payload).length === 0) {
+        showToast('No fields to update.');
+        return;
+    }
+
+    const btnText = document.querySelector('#btn-save-config .btn-text');
+    const loader = document.getElementById('config-loader');
+    
+    btnText.style.display = 'none';
+    loader.style.display = 'block';
+
+    try {
+        const res = await secureFetch('/api/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        
+        showToast(data.message || 'Config saved successfully!');
+        
+        // Show saved tag next to button
+        const saveTag = document.getElementById('save-success-tag');
+        if (saveTag) {
+            saveTag.style.display = 'inline-flex';
+            setTimeout(() => { saveTag.style.display = 'none'; }, 4000);
+        }
+
+        // Clear fields
+        document.getElementById('binance_api_key').value = '';
+        document.getElementById('binance_secret').value = '';
+        document.getElementById('telegram_token').value = '';
+        
+        checkConfigStatus();
+    } catch (err) {
+        if (err.message !== "Unauthorized") showToast('Failed to save config.');
+    } finally {
+        btnText.style.display = 'block';
+        loader.style.display = 'none';
+    }
+});
+
+// Action Buttons
+btnRun.addEventListener('click', async () => {
+    const originalText = btnRun.textContent;
+    btnRun.textContent = 'Running...';
+    btnRun.disabled = true;
+    try {
+        const res = await secureFetch('/api/run_cycle', { method: 'POST' });
+        const data = await res.json();
+        if (data.action) {
+            let reasonMap = {
+                "no_mtf_confluence": "Timeframes disagree (1H/15m/5m mixed)",
+                "black_swan": "Extreme volatility detected",
+                "below_confluence_threshold": "Not enough indicators agree",
+                "mtf_direction_conflict": "Timeframes conflict with signal",
+                "no_signals": "Market is neutral (0 points)",
+                "duplicate": "Trade already taken recently",
+                "insufficient_data": "Waiting for more candle data"
+            };
+            let mappedReason = data.reason ? (reasonMap[data.reason] || data.reason) : "";
+            let msg = `Cycle complete: ${data.action}`;
+            if (mappedReason) msg += ` (${mappedReason})`;
+            showToast(msg);
+        } else if (data.error) {
+            showToast(`Error: ${data.error}`);
+        }
+        setTimeout(() => {
+            fetchStatus();
+            fetchChartData();
+        }, 500);
+    } catch (e) {
+        if (e.message !== "Unauthorized") showToast('Failed to execute cycle.');
+    } finally {
+        btnRun.textContent = originalText;
+        btnRun.disabled = false;
+    }
+});
+
+
+const paperModeToggle = document.getElementById('paper_mode_toggle');
+if (paperModeToggle) {
+    paperModeToggle.addEventListener('change', async (e) => {
+        try {
+            await secureFetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paper_mode: e.target.checked })
+            });
+            showToast('Paper mode updated');
+            fetchStatus();
+        } catch (err) {
+            showToast('Failed to update paper mode');
+            e.target.checked = !e.target.checked; // Revert visually
+        }
+    });
+}
+
+const futuresModeToggle = document.getElementById('settings-futures-toggle');
+if (futuresModeToggle) {
+    futuresModeToggle.addEventListener('change', async (e) => {
+        try {
+            await secureFetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ futures_mode: e.target.checked })
+            });
+            showToast('Futures mode updated. Restarting cycle...');
+            fetchStatus();
+        } catch (err) {
+            showToast('Failed to update futures mode');
+            e.target.checked = !e.target.checked; // Revert visually
+        }
+    });
+}
+
+btnRefresh.addEventListener('click', () => {
+    fetchStatus();
+    fetchChartData();
+    showToast('Refreshing data...');
+});
+
+btnEmergency.addEventListener('click', async () => {
+    if (!confirm('Are you sure? This will sell all BTC at market price and halt the bot.')) return;
+    
+    const originalText = btnEmergency.textContent;
+    btnEmergency.textContent = 'Closing...';
+    try {
+        await secureFetch('/emergency', { method: 'POST' });
+        showToast('Emergency close executed.');
+        setTimeout(fetchStatus, 1000);
+    } catch (e) {
+        if (e.message !== "Unauthorized") showToast('Error executing emergency close.');
+    } finally {
+        btnEmergency.textContent = originalText;
+    }
+});
+
+btnResume.addEventListener('click', async () => {
+    const originalText = btnResume.textContent;
+    btnResume.textContent = 'Resuming...';
+    try {
+        await secureFetch('/resume', { method: 'POST' });
+        showToast('Trading resumed.');
+        setTimeout(fetchStatus, 1000);
+    } catch (e) {
+        if (e.message !== "Unauthorized") showToast('Error resuming trading.');
+    } finally {
+        btnResume.textContent = originalText;
+    }
+});
+
+// --- Analytics Dashboard ---
+let analyticsChart = null;
+let analyticsSeries = null;
+
+async function fetchAnalytics() {
+    try {
+        const res = await secureFetch('/api/analytics');
+        const json = await res.json();
+        if (json.status === 'success' && json.data) {
+            renderAnalytics(json.data);
+        }
+    } catch (e) {
+        console.error('Error fetching analytics:', e);
+    }
+}
+
+function renderAnalytics(data) {
+    const totalTrades = data.daily_stats ? data.daily_stats.trades || 0 : 0;
+    const wins = data.daily_stats ? data.daily_stats.wins || 0 : 0;
+    const winRate = totalTrades > 0 ? ((wins / totalTrades) * 100).toFixed(1) : 0;
+    const totalPnl = data.daily_stats ? (data.daily_stats.pnl_usd || 0).toFixed(2) : '0.00';
+
+    const el = (id) => document.getElementById(id);
+    if (el('analytics-total-trades')) el('analytics-total-trades').textContent = totalTrades;
+    if (el('analytics-win-rate')) el('analytics-win-rate').textContent = winRate + '%';
+    const pnlEl = el('analytics-total-pnl');
+    if (pnlEl) {
+        pnlEl.textContent = '$' + totalPnl;
+        pnlEl.style.color = parseFloat(totalPnl) >= 0 ? '#00ff9d' : '#ff4d4d';
+    }
+
+    // Equity Curve
+    const chartContainer = el('analytics-equity-chart');
+    if (!analyticsChart && chartContainer && typeof LightweightCharts !== 'undefined') {
+        analyticsChart = LightweightCharts.createChart(chartContainer, {
+            width: chartContainer.clientWidth, height: 300,
+            layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#8892b0' },
+            grid: { vertLines: { color: 'rgba(255,255,255,0.05)' }, horzLines: { color: 'rgba(255,255,255,0.05)' } },
+            timeScale: { timeVisible: true, secondsVisible: false }
+        });
+        analyticsSeries = analyticsChart.addAreaSeries({
+            topColor: 'rgba(0,255,157,0.4)', bottomColor: 'rgba(0,255,157,0.0)',
+            lineColor: '#00ff9d', lineWidth: 2
+        });
+    }
+    if (analyticsSeries && data.equity_curve && data.equity_curve.length > 0) {
+        const chartData = data.equity_curve.map(pt => ({
+            time: new Date(pt.time).getTime() / 1000, value: pt.value
+        })).filter(pt => !isNaN(pt.time)).sort((a,b) => a.time - b.time);
+        const unique = [];
+        let last = 0;
+        chartData.forEach(pt => { if (pt.time > last) { unique.push(pt); last = pt.time; } });
+        if (unique.length > 0) { analyticsSeries.setData(unique); analyticsChart.timeScale().fitContent(); }
+    }
+
+    // Tables
+    const regimeTable = el('analytics-regime-table');
+    if (regimeTable) {
+        regimeTable.innerHTML = Object.entries(data.by_regime || {}).map(([regime, stats]) => {
+            const rWR = stats.trades > 0 ? ((stats.wins / stats.trades) * 100).toFixed(1) : 0;
+            return `<tr><td style="padding:0.5rem 0;font-weight:500">${regime}</td><td style="padding:0.5rem 0;color:var(--text-muted)">${stats.trades}</td><td style="padding:0.5rem 0;color:${rWR>=50?'#00ff9d':'#ff4d4d'};font-weight:600">${rWR}%</td></tr>`;
+        }).join('') || '<tr><td colspan="3" style="padding:1rem 0;color:var(--text-muted);text-align:center">No data yet</td></tr>';
+    }
+    const symbolTable = el('analytics-symbol-table');
+    if (symbolTable) {
+        symbolTable.innerHTML = Object.entries(data.by_symbol || {}).map(([sym, stats]) => {
+            const sWR = stats.trades > 0 ? ((stats.wins / stats.trades) * 100).toFixed(1) : 0;
+            return `<tr><td style="padding:0.5rem 0;font-weight:500">${sym}</td><td style="padding:0.5rem 0;color:var(--text-muted)">${stats.trades}</td><td style="padding:0.5rem 0;color:${sWR>=50?'#00ff9d':'#ff4d4d'};font-weight:600">${sWR}%</td></tr>`;
+        }).join('') || '<tr><td colspan="3" style="padding:1rem 0;color:var(--text-muted);text-align:center">No data yet</td></tr>';
+    }
+}
+
+// Initial boot sequence
+async function boot() {
+    await initCSRF();
+    initChart();
+    fetchStatus();
+    fetchChartData();
+}
+
+boot();
+
+// Update Countdown Timer & Poll Status
+let pollCounter = 0;
+setInterval(() => {
+    if (!document.getElementById('login-overlay').classList.contains('active')) {
+        pollCounter++;
+        if (pollCounter >= 30) {
+            pollCounter = 0;
+            fetchStatus();
+        }
+        
+        // Update countdown
+        const countdownEl = document.getElementById('brain-countdown');
+        if (countdownEl && window.nextScanTime) {
+            let diff = Math.max(0, Math.floor(window.nextScanTime - (Date.now() / 1000)));
+            let m = Math.floor(diff / 60);
+            let s = diff % 60;
+            if (diff === 0) {
+                if (countdownEl.textContent !== "WAITING" && countdownEl.textContent !== "SCANNING...") {
+                    countdownEl.textContent = "SCANNING...";
+                    setTimeout(() => { if(countdownEl.textContent === 'SCANNING...') countdownEl.textContent = 'WAITING'; }, 60000);
+                // Trigger auto-scan
+                if (!document.getElementById('login-overlay').classList.contains('active')) {
+                    secureFetch('/api/run_cycle', { method: 'POST' }).then(() => {
+                        setTimeout(fetchStatus, 2000);
+                    }).catch(e => console.error(e));
+                }
+            }
+        }
+    }
+}, 1000);
+
+// Interval Buttons Logic
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.interval-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            // Reset styles
+            document.querySelectorAll('.interval-btn').forEach(b => {
+                b.style.background = 'rgba(255,255,255,0.05)';
+                b.style.border = '1px solid rgba(255,255,255,0.1)';
+                b.style.color = 'var(--text-muted)';
+            });
+            // Set active style
+            e.target.style.background = 'rgba(255,255,255,0.2)';
+            e.target.style.border = '1px solid rgba(255,255,255,0.3)';
+            e.target.style.color = '#fff';
+            
+            // Update state and fetch
+            activeChartInterval = e.target.getAttribute('data-interval');
+            fetchChartData();
+        });
+    });
+    
+    const selectEl = document.getElementById('chart-symbol-select');
+    if (selectEl) {
+        selectEl.addEventListener('change', (e) => {
+            activeChartSymbol = e.target.value;
+            userSelectedChartSymbol = true;
+            fetchChartData();
+        });
+    }
+});

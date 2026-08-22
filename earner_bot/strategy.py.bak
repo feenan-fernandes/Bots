@@ -1,0 +1,391 @@
+"""
+strategy.py — Quantum Bot 3.1 Strategy Engine
+Confluence-scored signals with adaptive thresholds, 4 regime detection,
+multi-timeframe confirmation, and closed-candle-only analysis.
+
+Scoring System (0-100 points):
+  MACD crossover:        0-20 pts
+  RSI position:          0-15 pts
+  Bollinger Band pos:    0-15 pts
+  Volume confirmation:   0-15 pts
+  Z-score deviation:     0-15 pts
+  Stochastic crossover:  0-10 pts
+  Trend alignment (MA):  0-10 pts
+  ─────────────────────────────
+  Maximum:               100 pts
+"""
+import pandas as pd
+import numpy as np
+import ta
+import logging
+from typing import Dict, Tuple, Any, Optional
+from config import ATR_MULTIPLIER
+
+logger = logging.getLogger("quantum.strategy")
+
+_WEIGHTS_CACHE = None
+_LAST_WEIGHTS_READ = 0
+
+
+def get_data(client, symbol: str, interval: str, lookback: int = 200) -> pd.DataFrame:
+    """Fetch OHLCV candles from Binance and return a clean DataFrame."""
+    candles = client.get_klines(symbol=symbol, interval=interval, limit=lookback)
+    df = pd.DataFrame(candles, columns=[
+        "time", "open", "high", "low", "close", "volume",
+        "ct", "qa", "nt", "tbv", "tqv", "ignore"])
+    for col in ["open", "high", "low", "close", "volume"]:
+        df[col] = df[col].astype(float)
+    df["time"] = pd.to_datetime(df["time"], unit="ms")
+    return df.set_index("time")
+
+
+def drop_incomplete_candle(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Drop the last row if it's a still-forming candle.
+    Prevents repainting: indicators on incomplete candles can trigger false
+    signals that reverse by candle close.
+    """
+    if len(df) < 2:
+        return df
+    # Drop last candle (the one currently forming)
+    return df.iloc[:-1].copy()
+
+
+def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute all 12 technical indicators. Returns df with NaN rows dropped."""
+    df = df.copy()
+
+    # Bollinger Bands (20, 2)
+    bb = ta.volatility.BollingerBands(df["close"], window=20, window_dev=2)
+    df["BB_upper"] = bb.bollinger_hband()
+    df["BB_lower"] = bb.bollinger_lband()
+    df["BB_mid"]   = bb.bollinger_mavg()
+    df["BB_width"] = (df["BB_upper"] - df["BB_lower"]) / df["BB_mid"]
+
+    # RSI (14)
+    df["RSI"] = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
+
+    # Moving Average & Z-score
+    df["MA25"]   = df["close"].rolling(25).mean()
+    df["std25"]  = df["close"].rolling(25).std()
+    df["zscore"] = (df["close"] - df["MA25"]) / df["std25"]
+
+    # ADX (14)
+    adx = ta.trend.ADXIndicator(df["high"], df["low"], df["close"], window=14)
+    df["ADX"] = adx.adx()
+
+    # MACD (12, 26, 9)
+    macd = ta.trend.MACD(df["close"])
+    df["MACD"]        = macd.macd()
+    df["MACD_signal"] = macd.macd_signal()
+    df["MACD_hist"]   = macd.macd_diff()
+
+    # Stochastic Oscillator (14, 3)
+    stoch = ta.momentum.StochasticOscillator(
+        df["high"], df["low"], df["close"], window=14, smooth_window=3)
+    df["stoch_k"] = stoch.stoch()
+    df["stoch_d"] = stoch.stoch_signal()
+
+    # ATR (14)
+    df["ATR"] = ta.volatility.AverageTrueRange(
+        df["high"], df["low"], df["close"], window=14).average_true_range()
+
+    # Volume analysis
+    df["vol_ma"]    = df["volume"].rolling(20).mean()
+    df["vol_spike"] = df["volume"] / df["vol_ma"]
+
+    # Price Rate of Change (3-period) - currently unused, keeping for potential ML use
+    df["price_roc"] = df["close"].pct_change(3)
+
+    return df.dropna()
+
+
+def detect_regime(df: pd.DataFrame) -> str:
+    """
+    Classify current market regime into one of 4 states.
+    Uses volatility clustering, ADX, and volume anomalies.
+    """
+    if len(df) < 2:
+        return "RANGING"
+
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    # BLACK_SWAN: extreme range exceeds ATR threshold (using True Range to catch gaps)
+    true_range = max(last["high"] - last["low"], abs(last["high"] - prev["close"]), abs(last["low"] - prev["close"]))
+    if true_range > ATR_MULTIPLIER * last["ATR"]:
+        logger.warning("BLACK_SWAN detected: TR %.2f > %.2f",
+                       true_range, ATR_MULTIPLIER * last["ATR"])
+        return "BLACK_SWAN"
+
+    # PANIC: volume spike + significant price drop (scaled by ATR)
+    price_drop = (prev["close"] - last["close"]) / prev["close"]
+    atr_pct = last["ATR"] / last["close"]
+    if last["vol_spike"] > 2.0 and price_drop > (atr_pct * 1.5):
+        logger.warning("PANIC detected: vol_spike=%.1f, drop=%.2f%%",
+                       last["vol_spike"], price_drop * 100)
+        return "PANIC"
+
+    # TRENDING: strong directional movement
+    # Don't drop trending status just because volatility mean-reverted, keep it if ADX is strong
+    if last["ADX"] > 25:
+        return "TRENDING"
+
+    return "RANGING"
+
+
+def compute_confluence_score(df: pd.DataFrame, regime: str) -> Tuple[str, int, Dict[str, int]]:
+    """
+    Compute a weighted confluence score (0-100) from multiple indicators.
+    Each indicator votes BUY or SELL with weighted points.
+    Returns (direction, total_score, breakdown_dict).
+    """
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    buy_pts: Dict[str, int] = {}
+    sell_pts: Dict[str, int] = {}
+    
+    # Load VALIDATED dynamic weights from ML Optimizer (cached)
+    import json
+    import os
+    import time
+    
+    global _WEIGHTS_CACHE, _LAST_WEIGHTS_READ
+    current_time = time.time()
+    
+    if _WEIGHTS_CACHE is None or current_time - _LAST_WEIGHTS_READ > 300:
+        weights = {
+            "macd": 20,
+            "rsi": 15,
+            "bb": 15,
+            "volume": 15,
+            "zscore": 15,
+            "stochastic": 10,
+            "trend": 10,
+            "regime_bonus": 5
+        }
+        try:
+            w_file = os.path.join("output", "weights.json")
+            if os.path.exists(w_file):
+                with open(w_file, "r") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict) and data.get("validated", False):
+                        ml_weights = data.get("weights", {})
+                        if isinstance(ml_weights, dict) and ml_weights:
+                            weights.update(ml_weights)
+        except Exception:
+            pass
+            
+        _WEIGHTS_CACHE = weights
+        _LAST_WEIGHTS_READ = current_time
+    else:
+        weights = _WEIGHTS_CACHE
+
+    # ─── 1. MACD Crossover (max 20 pts) ──────────────────────────
+    macd_cross_up = prev["MACD"] < prev["MACD_signal"] and last["MACD"] > last["MACD_signal"]
+    macd_cross_dn = prev["MACD"] > prev["MACD_signal"] and last["MACD"] < last["MACD_signal"]
+    hist_rising = last["MACD_hist"] > prev["MACD_hist"] if "MACD_hist" in last.index else False
+
+    if macd_cross_up:
+        buy_pts["macd"] = weights.get("macd", 20)
+    elif hist_rising and last["MACD"] > last["MACD_signal"]:
+        buy_pts["macd"] = 10
+
+    if macd_cross_dn:
+        sell_pts["macd"] = weights.get("macd", 20)
+    elif not hist_rising and last["MACD"] < last["MACD_signal"]:
+        sell_pts["macd"] = 10
+
+    # ─── 2. RSI — Adaptive Thresholds (max 15 pts) ───────────────
+    rsi = last["RSI"]
+    rsi_20pct = df["RSI"].rolling(50, min_periods=20).quantile(0.2).iloc[-1]
+    rsi_80pct = df["RSI"].rolling(50, min_periods=20).quantile(0.8).iloc[-1]
+    rsi_low  = max(rsi_20pct, 25) if not np.isnan(rsi_20pct) else 30
+    rsi_high = min(rsi_80pct, 75) if not np.isnan(rsi_80pct) else 70
+
+    if rsi < rsi_low:
+        buy_pts["rsi"] = weights.get("rsi", 15)
+    elif rsi < 40:
+        buy_pts["rsi"] = 8
+    if rsi > rsi_high:
+        sell_pts["rsi"] = weights.get("rsi", 15)
+    elif rsi > 60:
+        sell_pts["rsi"] = 8
+
+    # ─── 3. Bollinger Band Position (max 15 pts) ─────────────────
+    bb_range = last["BB_upper"] - last["BB_lower"]
+    bb_pos = (last["close"] - last["BB_lower"]) / bb_range if bb_range > 0 else 0.5
+
+    if bb_pos < 0.05:
+        buy_pts["bb"] = weights.get("bb", 15)
+    elif bb_pos < 0.20:
+        buy_pts["bb"] = 10
+    elif bb_pos < 0.30:
+        buy_pts["bb"] = 5
+
+    if bb_pos > 0.95:
+        sell_pts["bb"] = weights.get("bb", 15)
+    elif bb_pos > 0.80:
+        sell_pts["bb"] = 10
+    elif bb_pos > 0.70:
+        sell_pts["bb"] = 5
+
+    # ─── 4. Volume Confirmation (max 15 pts) ─────────────────────
+    vol = last["vol_spike"]
+    if vol > 2.0:
+        vol_pts = weights.get("volume", 15)
+    elif vol > 1.5:
+        vol_pts = 10
+    elif vol > 1.2:
+        vol_pts = 5
+    else:
+        vol_pts = 0
+
+    # Volume confirms the stronger direction
+    if sum(buy_pts.values()) > sum(sell_pts.values()):
+        buy_pts["volume"] = vol_pts
+    elif sum(sell_pts.values()) > sum(buy_pts.values()):
+        sell_pts["volume"] = vol_pts
+    else:
+        # Neutral volume — give smaller points to both
+        buy_pts["volume"] = vol_pts // 2
+        sell_pts["volume"] = vol_pts // 2
+
+    # ─── 5. Z-Score Mean Reversion (max 15 pts) ──────────────────
+    z = last["zscore"]
+    if z < -2.0:
+        buy_pts["zscore"] = weights.get("zscore", 15)
+    elif z < -1.5:
+        buy_pts["zscore"] = 10
+    elif z < -1.0:
+        buy_pts["zscore"] = 5
+    if z > 2.0:
+        sell_pts["zscore"] = weights.get("zscore", 15)
+    elif z > 1.5:
+        sell_pts["zscore"] = 10
+    elif z > 1.0:
+        sell_pts["zscore"] = 5
+
+    # ─── 6. Stochastic Crossover (max 10 pts) ────────────────────
+    stoch_cross_up = prev["stoch_k"] < prev["stoch_d"] and last["stoch_k"] > last["stoch_d"]
+    stoch_cross_dn = prev["stoch_k"] > prev["stoch_d"] and last["stoch_k"] < last["stoch_d"]
+
+    if last["stoch_k"] < 20 and stoch_cross_up:
+        buy_pts["stochastic"] = weights.get("stochastic", 10)
+    elif last["stoch_k"] < 30:
+        buy_pts["stochastic"] = 5
+    if last["stoch_k"] > 80 and stoch_cross_dn:
+        sell_pts["stochastic"] = weights.get("stochastic", 10)
+    elif last["stoch_k"] > 70:
+        sell_pts["stochastic"] = 5
+
+    # ─── 7. Trend Alignment — MA25 (max 10 pts) ──────────────────
+    above_ma = last["close"] > last["MA25"]
+    ma_slope = 0.0
+    if len(df) >= 5:
+        ma_5ago = df["MA25"].iloc[-5]
+        if ma_5ago > 0:
+            ma_slope = (last["MA25"] - ma_5ago) / ma_5ago
+
+    if above_ma and ma_slope > 0.001:
+        buy_pts["trend"] = weights.get("trend", 10)
+    elif above_ma:
+        buy_pts["trend"] = 5
+    if not above_ma and ma_slope < -0.001:
+        sell_pts["trend"] = weights.get("trend", 10)
+    elif not above_ma:
+        sell_pts["trend"] = 5
+
+    # ─── Regime-specific bonus (max 5 pts) ────────────────────────
+    if regime == "TRENDING":
+        if above_ma and ma_slope > 0:
+            buy_pts["regime_bonus"] = weights.get("regime_bonus", 5)
+        elif not above_ma and ma_slope < 0:
+            sell_pts["regime_bonus"] = weights.get("regime_bonus", 5)
+    elif regime == "RANGING":
+        if z < -2.0:
+            buy_pts["regime_bonus"] = weights.get("regime_bonus", 5)
+        elif z > 2.0:
+            sell_pts["regime_bonus"] = weights.get("regime_bonus", 5)
+    elif regime == "PANIC":
+        if stoch_cross_up and last["stoch_k"] < 15:
+            buy_pts["regime_bonus"] = weights.get("regime_bonus", 5)
+
+    # ─── Trend-Aware Oscillator Penalties ─────────────────────────
+    if regime == "TRENDING":
+        # In an uptrend (above MA and rising), heavily discount overbought signals
+        if above_ma and ma_slope > 0:
+            if "rsi" in sell_pts: sell_pts["rsi"] //= 2
+            if "bb" in sell_pts: sell_pts["bb"] //= 2
+            if "stochastic" in sell_pts: sell_pts["stochastic"] //= 2
+            if "zscore" in sell_pts: sell_pts["zscore"] //= 2
+        # In a downtrend, discount oversold signals
+        elif not above_ma and ma_slope < 0:
+            if "rsi" in buy_pts: buy_pts["rsi"] //= 2
+            if "bb" in buy_pts: buy_pts["bb"] //= 2
+            if "stochastic" in buy_pts: buy_pts["stochastic"] //= 2
+            if "zscore" in buy_pts: buy_pts["zscore"] //= 2
+
+    # ─── Final decision ──────────────────────────────────────────
+    buy_total  = sum(buy_pts.values())
+    sell_total = sum(sell_pts.values())
+
+    from config import MIN_CONFLUENCE_SCORE
+    if buy_total > sell_total and buy_total >= MIN_CONFLUENCE_SCORE:
+        return "BUY", buy_total, buy_pts
+    elif sell_total > buy_total and sell_total >= MIN_CONFLUENCE_SCORE:
+        return "SELL", sell_total, sell_pts
+    
+    # Return max score for UI visibility even if we hold
+    return "HOLD", max(buy_total, sell_total), buy_pts if buy_total > sell_total else sell_pts
+
+
+def get_signal(df: pd.DataFrame, regime: str, client=None, symbol: str = None) -> Dict[str, Any]:
+    """
+    Main signal generator. Returns a dict with signal, confidence score,
+    and indicator breakdown for audit trail. Incorporates Leading Data (Order Book).
+    """
+    if regime == "BLACK_SWAN":
+        return {"signal": "HOLD", "score": 0, "breakdown": {}, "regime": regime}
+
+    signal, score, breakdown = compute_confluence_score(df, regime)
+
+    return {
+        "signal": signal,
+        "score": score,
+        "breakdown": breakdown,
+        "regime": regime,
+    }
+
+
+def multi_timeframe_gate(client, symbol: str) -> str:
+    """
+    Check multi-timeframe alignment (1h, 15m, 5m).
+    All timeframes must agree on direction for confirmation.
+    Returns CONFIRMED_BUY, CONFIRMED_SELL, or MIXED.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _fetch_iv(iv):
+        try:
+            # Expand MTF lookback to 100 for better EMA convergence, avoid calculating all 12 indicators
+            df = get_data(client, symbol, iv, 100)
+            df = drop_incomplete_candle(df)
+            if len(df) < 25:
+                return "MIXED"
+            ma25 = df["close"].rolling(25).mean().iloc[-1]
+            last_close = df.iloc[-1]["close"]
+            return "BULL" if last_close > ma25 else "BEAR"
+        except Exception as e:
+            logger.warning("MTF gate error for %s: %s", iv, e)
+            return "MIXED"
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        biases = list(executor.map(_fetch_iv, ("1h", "15m", "5m")))
+
+    if all(b == "BULL" for b in biases):
+        return "CONFIRMED_BUY"
+    if all(b == "BEAR" for b in biases):
+        return "CONFIRMED_SELL"
+    return "MIXED"

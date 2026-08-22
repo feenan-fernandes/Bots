@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ouroboros Institutional Terminal</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Top Command Navigation -->
+        <nav class="top-nav glass-panel-dark">
+            <div class="nav-left">
+                <div class="logo-container">
+                    <div class="logo-icon">
+                        <img src="/ouroboros_logo.jpg" alt="Ouroboros Logo">
+                    </div>
+                    <div class="logo-text">Ouroboros <span>3.1</span></div>
+                </div>
+                <ul class="nav-links">
+                    <li class="active" id="nav-dashboard">Dashboard</li>
+                    <li id="nav-ml">Analytics</li>
+                    <li id="nav-settings">Settings</li>
+                </ul>
+            </div>
+            
+            <div class="nav-right">
+                <div class="status-indicator">
+                    <div class="pulse-dot" id="system-pulse"></div>
+                    <span id="system-status-text">Connecting...</span>
+                </div>
+                
+                <div class="nav-divider"></div>
+                
+                <div class="paper-toggle-container">
+                    <label>Paper Mode</label>
+                    <label class="switch">
+                        <input type="checkbox" id="paper_mode_toggle">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+                
+                <div class="nav-divider"></div>
+
+                <div class="action-buttons">
+                    <button class="btn btn-primary" id="btn-run">Force Scan</button>
+                    <button class="btn btn-secondary" id="btn-refresh">Refresh UI</button>
+                    <button class="btn btn-danger" id="btn-emergency">Emergency Close</button>
+                    <button class="btn btn-primary" id="btn-resume" style="display: none;">Resume</button>
+                </div>
+                
+                <button id="nav-logout" class="logout-btn" title="Logout">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                </button>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            
+            <!-- DASHBOARD VIEW -->
+            <section id="view-dashboard" class="view active">
+                <div class="bento-grid">
+                    
+                    <!-- Top Metrics Row -->
+                    <div class="bento-row metrics-row">
+                        <div class="metric-card glass-panel">
+                            <h3>Portfolio Value</h3>
+                            <div class="value"><span class="currency">AED</span> <span id="val-portfolio-aed">0.00</span></div>
+                            <div class="sub-value">
+                                <span>USD <span id="val-portfolio-usd">0.00</span></span>
+                                <span class="utilized">In Trade: <span id="val-utilized-usd">$0.00</span></span>
+                            </div>
+                            <div class="progress-bar-bg">
+                                <div id="val-utilized-bar" class="progress-bar-fill"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="metric-card glass-panel">
+                            <h3>Daily P&L</h3>
+                            <div class="value" id="val-daily-pnl"><span class="currency">AED</span> 0.00</div>
+                            <div class="sub-value">USD <span id="val-daily-pnl-usd">0.00</span></div>
+                        </div>
+                        
+                        <div class="metric-card glass-panel">
+                            <h3>Win Rate</h3>
+                            <div class="value" id="val-win-rate">0%</div>
+                            <div class="sub-value" id="val-trades-count">0 Trades Today</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Middle Row: Chart (Left) + Brain (Right) -->
+                    <div class="bento-row middle-row">
+                        <div class="panel glass-panel chart-panel">
+                            <div class="panel-header">
+                                <div class="header-left">
+                                    <h3 id="chart-title">Live Market View</h3>
+                                    <select id="chart-symbol-select" class="dropdown-dark" style="display: none;"></select>
+                                </div>
+                                <div id="chart-intervals" class="interval-group">
+                                    <button class="interval-btn" data-interval="1d">1D</button>
+                                    <button class="interval-btn" data-interval="1h">1H</button>
+                                    <button class="interval-btn" data-interval="15m">15m</button>
+                                    <button class="interval-btn active" data-interval="5m">5m</button>
+                                    <button class="interval-btn" data-interval="1m">1m</button>
+                                </div>
+                            </div>
+                            <div class="panel-body">
+                                <div id="chart-container"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="panel glass-panel brain-panel">
+                            <div class="panel-header">
+                                <h3>Strategy Brain Status</h3>
+                            </div>
+                            <div class="panel-body">
+                                <div class="brain-row"><span class="lbl">Signal Outcome</span><span class="val" id="brain-signal">WAITING</span></div>
+                                <div class="brain-row"><span class="lbl">Market Regime</span><span class="val" id="brain-regime">WAITING</span></div>
+                                <div class="brain-row"><span class="lbl">Strategy Mode</span><span class="val" id="brain-strategy-mode" class="text-neon">MACRO SWING</span></div>
+                                <div class="brain-row"><span class="lbl">MTF Bias</span><span class="val" id="brain-mtf">WAITING</span></div>
+                                <div class="brain-row"><span class="lbl">Confluence Score</span><span class="val" id="brain-score">0</span></div>
+                                <div class="brain-row"><span class="lbl">Next Scan</span><span class="val" id="brain-countdown">WAITING</span></div>
+                                <div class="brain-row"><span class="lbl">Scanning</span><span class="val" id="brain-scanning">None</span></div>
+                                
+                                <div class="brain-breakdown-container">
+                                    <div class="breakdown-title">Indicator Breakdown</div>
+                                    <div id="brain-breakdown"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Bottom Row: Active Trades + Candidates + History -->
+                    <div class="bento-row bottom-row">
+                        <div class="panel glass-panel list-panel">
+                            <div class="panel-header">
+                                <h3>Active Trades</h3>
+                                <div id="active-trades-split"></div>
+                            </div>
+                            <div class="panel-body scrollable" id="active-trade-container">
+                                <div class="empty-state">No active positions.</div>
+                            </div>
+                        </div>
+                        
+                        <div class="panel glass-panel list-panel">
+                            <div class="panel-header">
+                                <h3>Top Candidates</h3>
+                                <span class="badge badge-neutral" id="brain-scan">Never</span>
+                            </div>
+                            <div class="panel-body scrollable">
+                                <table class="styled-table">
+                                    <thead><tr><th>Asset</th><th>Score</th><th>Bounce</th><th>Candle</th><th>Regime</th></tr></thead>
+                                    <tbody id="top-candidates-body">
+                                        <tr><td colspan="5" class="empty-state">Awaiting scan...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        
+                        <div class="panel glass-panel list-panel">
+                            <div class="panel-header">
+                                <h3>Recent History</h3>
+                            </div>
+                            <div class="panel-body scrollable">
+                                <ul class="trade-list" id="trade-history-list">
+                                    <!-- Populated via JS -->
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    
+                </div>
+            </section>
+
+            <!-- ANALYTICS VIEW -->
+            <section id="view-analytics" class="view">
+                <!-- Analytics Filter Bar -->
+                <div class="analytics-filters glass-panel" style="display: flex; gap: 15px; margin-bottom: 20px; padding: 15px; align-items: center; border-radius: var(--radius);">
+                    <div style="font-weight: 600; color: var(--text);">Filters:</div>
+                    <select id="analytics-filter-timeframe" class="custom-select" style="min-width: 150px;">
+                        <option value="ALL">All Time</option>
+                        <option value="MTD">Month to Date (MTD)</option>
+                        <option value="YTD">Year to Date (YTD)</option>
+                        <option value="CUSTOM">Custom Date...</option>
+                    </select>
+                    <input type="date" id="analytics-filter-start" class="custom-input" style="display: none; max-height: 35px;">
+                    <input type="date" id="analytics-filter-end" class="custom-input" style="display: none; max-height: 35px;">
+                    
+                    <select id="analytics-filter-coin" class="custom-select" style="min-width: 150px;">
+                        <option value="ALL">All Coins</option>
+                    </select>
+                    
+                    <button id="analytics-apply-filters" class="primary-btn" style="padding: 0 15px; height: 35px; margin-left: auto;">Apply Filters</button>
+                </div>
+                
+                <div class="bento-grid">
+                    <div class="bento-row metrics-row">
+                        <div class="metric-card glass-panel">
+                            <h3>Total Trades</h3>
+                            <div class="value" id="analytics-total-trades">0</div>
+                        </div>
+                        <div class="metric-card glass-panel">
+                            <h3>Overall Win Rate</h3>
+                            <div class="value" id="analytics-win-rate">0%</div>
+                        </div>
+                        <div class="metric-card glass-panel">
+                            <h3>Total Net PNL</h3>
+                            <div class="value" id="analytics-total-pnl">$0.00</div>
+                        </div>
+                    </div>
+                    
+                    <div class="bento-row analytics-middle-row">
+                        <div class="panel glass-panel equity-panel">
+                            <div class="panel-header"><h3>Equity Curve (Cumulative PNL)</h3></div>
+                            <div class="panel-body">
+                                <div id="analytics-equity-chart"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="analytics-tables-col">
+                            <div class="panel glass-panel">
+                                <div class="panel-header"><h3>Win Rate by Regime</h3></div>
+                                <div class="panel-body scrollable">
+                                    <table class="styled-table">
+                                        <thead><tr><th>Regime</th><th>Trades</th><th>Win Rate</th></tr></thead>
+                                        <tbody id="analytics-regime-table"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <div class="panel glass-panel">
+                                <div class="panel-header"><h3>Win Rate by Symbol</h3></div>
+                                <div class="panel-body scrollable">
+                                    <table class="styled-table">
+                                        <thead><tr><th>Symbol</th><th>Trades</th><th>Win Rate</th></tr></thead>
+                                        <tbody id="analytics-symbol-table"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SETTINGS VIEW -->
+            <section id="view-settings" class="view">
+                <div class="panel glass-panel settings-panel">
+                    <div class="panel-header">
+                        <h3>API Configuration</h3>
+                        <p class="subtitle">Securely update your exchange and notification keys.</p>
+                    </div>
+                    <div class="panel-body">
+                        <div class="alert alert-info" id="config-status-alert">Loading configuration status...</div>
+                        
+                        <form id="config-form" class="settings-form">
+                            <div class="form-group">
+                                <label for="binance_api_key">Binance API Key <span class="badge badge-success" id="badge-api" style="display:none;">Saved</span></label>
+                                <input type="password" id="binance_api_key" placeholder="Enter API Key">
+                            </div>
+                            <div class="form-group">
+                                <label for="binance_secret">Binance Secret Key <span class="badge badge-success" id="badge-secret" style="display:none;">Saved</span></label>
+                                <input type="password" id="binance_secret" placeholder="Enter Secret Key">
+                            </div>
+                            <div class="form-group">
+                                <label for="telegram_token">Telegram Bot Token <span class="badge badge-success" id="badge-tg-token" style="display:none;">Saved</span></label>
+                                <input type="password" id="telegram_token" placeholder="123456789:ABCdefGHIjklMNO...">
+                            </div>
+                            <div class="form-group">
+                                <label for="telegram_chat_id">Telegram Chat ID <span class="badge badge-success" id="badge-tg-chat" style="display:none;">Saved</span></label>
+                                <input type="text" id="telegram_chat_id" placeholder="-100123456789">
+                            </div>
+                            <div class="form-group">
+                                <label for="blacklist_symbols">Blacklisted Symbols</label>
+                                <input type="text" id="blacklist_symbols" placeholder="BTCUSDT, ETHUSDT">
+                            </div>
+                            
+                            <div class="form-group toggle-group">
+                                <div>
+                                    <label>Enable Futures Mode</label>
+                                    <small>If disabled, uses Spot Market.</small>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" id="settings-futures-toggle">
+                                    <span class="slider round"></span>
+                                </label>
+                            </div>
+                            
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary" id="btn-save-config">
+                                    <span class="btn-text">Save Configuration</span>
+                                    <div class="loader" id="config-loader"></div>
+                                </button>
+                                <span id="save-success-tag" class="success-tag" style="display: none;">Saved Successfully</span>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast"></div>
+
+    <!-- Login Overlay -->
+    <div id="login-overlay" class="login-overlay active">
+        <div class="login-modal glass-panel">
+            <img src="/ouroboros_logo.jpg" alt="Logo" class="login-logo">
+            <h2>Authentication Required</h2>
+            <p>Access highly restricted institutional terminal.</p>
+            <form id="login-form">
+                <div class="form-group">
+                    <input type="password" id="login_passphrase" placeholder="Admin Passphrase" required>
+                </div>
+                <button type="submit" class="btn btn-primary login-btn" id="btn-login">
+                    <span class="btn-text">Authenticate</span>
+                    <div class="loader" id="login-loader"></div>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script src="/app.js?v=5"></script>
+</body>
+</html>
