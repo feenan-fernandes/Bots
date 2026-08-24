@@ -20,11 +20,11 @@ pip install -r requirements.txt
 
 ### 3. Launching the Bot
 Simply run the included batch file to start the server and open the local UI:
-`ash
+`bash
 Ouroboros_Manager.bat
 `
 Alternatively, you can run the Python server directly:
-`ash
+`bash
 python app.py
 `
 The dashboard will be available in your browser at http://127.0.0.1:5000.
