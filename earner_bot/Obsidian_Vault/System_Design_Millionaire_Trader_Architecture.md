@@ -135,3 +135,46 @@ No order can touch the Binance network without passing through five synchronous,
    python app.py
    ```
 3. Your local Windows machine in Dubai stays connected as the **Control & Analytics Plane**, pulling synced trade dossiers into your **Obsidian Vault** for visual review!
+
+---
+
+## 5. Multi-Venue Expansion: MetaTrader 5 (MT5) Integration
+
+```mermaid
+flowchart TD
+    subgraph CoreBrain [Ouroboros Core Brain]
+        MICRO[Microstructure Engine: OFI & Micro-Price]
+        STRAT[Regime Alpha Models: strategy.py]
+        GATE[Deterministic Pre-Trade Risk Gate: pre_trade_risk.py]
+        MEM[Obsidian Neural Memory Vault & Autopsy]
+        
+        MICRO --> STRAT --> GATE
+        GATE --> ROUTER{Pluggable Broker Router}
+        ROUTER -. Closed Trade Telemetry .-> MEM
+    end
+
+    subgraph Venues [Execution Bridges]
+        ROUTER -->|Crypto Spot Mode| BINANCE[broker_binance.py]
+        ROUTER -->|Forex & Prop Firm Mode| MT5[broker_mt5.py]
+        
+        BINANCE --> B_EX[Binance Matching Engine]
+        MT5 --> MT5_TERM[MetaTrader 5 Client Terminal]
+        MT5_TERM --> PROP[Forex / Prop Firm Brokerage: FTMO, FundedNext]
+    end
+```
+
+### Can Ouroboros integrate with MetaTrader 5 (MT5)?
+**Yes, natively.** 
+
+If you ever want to expand our bot from Binance Spot into Forex, Gold (XAUUSD), or Prop-Firm challenges (FTMO, FundedNext, The5ers), you do not need to rewrite the quantitative brain:
+1. **The Core Brain Stays 100% Identical**:
+   - The **Microstructure Engine** (`orderflow_engine.py`)
+   - The **Regime Strategy Engine** (`strategy.py`)
+   - The **Deterministic Pre-Trade Risk Gate** (`pre_trade_risk.py`)
+   - The **Self-Learning Autopsy & Obsidian Memory Vault** (`obsidian_vault_mgr.py`, `autopsy.py`)
+2. **MT5 Acts Purely as the Execution Bridge**:
+   - Via our official adapter [broker_mt5.py](file:///c:/Users/feena/OneDrive/Documents/Agentic/earner_bot/broker_mt5.py), the bot communicates directly with the local MT5 client terminal via the official `MetaTrader5` Python library.
+   - It fires native market deals, secures brackets (`TRADE_ACTION_SLTP`), and enforces the dead-man switch across MT5 open positions.
+3. **Institutional Prop Firm Compatibility**:
+   - The strict **-3.0% Daily Drawdown Circuit Breaker** in `pre_trade_risk.py` is specifically calibrated to guarantee you never violate prop firm maximum daily drawdown limits (typically 5%).
+
