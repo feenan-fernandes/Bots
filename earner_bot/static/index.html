@@ -17,7 +17,7 @@
                     <div class="logo-icon">
                         <img src="/ouroboros_logo.jpg" alt="Ouroboros Logo">
                     </div>
-                    <div class="logo-text">Ouroboros <span>3.1</span></div>
+                    <div class="logo-text">Ouroboros <span>3.2 Quant</span></div>
                 </div>
                 <ul class="nav-links">
                     <li class="active" id="nav-dashboard">Dashboard</li>
@@ -27,9 +27,25 @@
             </div>
             
             <div class="nav-right">
-                <div class="status-indicator">
-                    <div class="pulse-dot" id="system-pulse"></div>
-                    <span id="system-status-text">Connecting...</span>
+                <!-- Institutional Telemetry Strip -->
+                <div class="telemetry-strip">
+                    <div class="telemetry-pill dms-pill" title="Independent External Dead-Man's Switch Failsafe">
+                        <div class="pulse-dot" id="dms-pulse"></div>
+                        <span class="pill-label">DMS:</span>
+                        <span id="val-dms-status">ARMED</span>
+                        <span class="pill-ms" id="val-dms-ms">350ms</span>
+                    </div>
+
+                    <div class="telemetry-pill risk-pill" title="Deterministic Pre-Trade Risk Engine">
+                        <span class="pill-label">Risk Gate:</span>
+                        <span id="val-risk-status" class="text-neon">NOMINAL</span>
+                        <span class="pill-sub" id="val-risk-dd">DD: 0.0%</span>
+                    </div>
+
+                    <div class="telemetry-pill venue-pill" title="Active Execution Venue">
+                        <span class="pill-label">Venue:</span>
+                        <span id="val-venue-tag">BINANCE SPOT</span>
+                    </div>
                 </div>
                 
                 <div class="nav-divider"></div>
@@ -64,7 +80,7 @@
             <section id="view-dashboard" class="view active">
                 <div class="bento-grid">
                     
-                    <!-- Top Metrics Row -->
+                    <!-- Top Metrics Row (4 Institutional Metric Cards) -->
                     <div class="bento-row metrics-row">
                         <div class="metric-card glass-panel">
                             <h3>Portfolio Value</h3>
@@ -89,10 +105,23 @@
                             <div class="value" id="val-win-rate">0%</div>
                             <div class="sub-value" id="val-trades-count">0 Trades Today</div>
                         </div>
+
+                        <div class="metric-card glass-panel" title="Deterministic Drawdown & Notional Guardrails">
+                            <h3>Pre-Trade Risk Exposure</h3>
+                            <div class="value" id="val-risk-exposure-pct">0.0%</div>
+                            <div class="sub-value">
+                                <span>Drawdown: <span id="val-risk-current-dd">0.0%</span> / <span style="color:var(--danger)">-3.0%</span></span>
+                                <span>Cap: <span id="val-risk-cap">$25,000</span></span>
+                            </div>
+                            <div class="progress-bar-bg">
+                                <div id="val-risk-dd-bar" class="progress-bar-fill" style="background: var(--accent-neon); width: 0%;"></div>
+                            </div>
+                        </div>
                     </div>
                     
-                    <!-- Middle Row: Chart (Left) + Brain (Right) -->
+                    <!-- Middle Row: Chart (Left 55%) + Order Flow (Center 23%) + Brain (Right 22%) -->
                     <div class="bento-row middle-row">
+                        <!-- 1. Live Market Chart -->
                         <div class="panel glass-panel chart-panel">
                             <div class="panel-header">
                                 <div class="header-left">
@@ -112,22 +141,96 @@
                             </div>
                         </div>
                         
+                        <!-- 2. Order Flow & Microstructure Cockpit -->
+                        <div class="panel glass-panel orderflow-panel">
+                            <div class="panel-header">
+                                <h3>Order Flow Microstructure</h3>
+                                <span class="badge badge-success" id="of-focus-symbol">BTCUSDT</span>
+                            </div>
+                            <div class="panel-body">
+                                <div class="of-metric-group">
+                                    <div class="of-label-row">
+                                        <span class="lbl">Micro-Price (Weighted Mid)</span>
+                                        <span class="val text-neon" id="of-micro-price">$0.00</span>
+                                    </div>
+                                    <div class="of-sub-row">
+                                        <span class="lbl">Mid Price: <span id="of-mid-price">$0.00</span></span>
+                                        <span class="badge" id="of-skew-badge">+0.00 bps</span>
+                                    </div>
+                                </div>
+
+                                <div class="of-metric-group">
+                                    <div class="of-label-row">
+                                        <span class="lbl">Order Flow Imbalance (OFI)</span>
+                                        <span class="val" id="of-ofi-value">0.000</span>
+                                    </div>
+                                    <div class="ofi-gauge-container">
+                                        <div class="ofi-gauge-bar">
+                                            <div class="ofi-gauge-center"></div>
+                                            <div class="ofi-gauge-pointer" id="of-ofi-pointer" style="left: 50%;"></div>
+                                        </div>
+                                        <div class="ofi-gauge-labels">
+                                            <span style="color:var(--danger)">ASK WALL (-1.0)</span>
+                                            <span style="color:var(--text-tertiary)">NEUTRAL</span>
+                                            <span style="color:var(--success)">BID SWEEP (+1.0)</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="of-metric-group">
+                                    <div class="of-label-row">
+                                        <span class="lbl">Level-2 Queue Depth (Top 5)</span>
+                                        <span class="val"><span id="of-bids-depth">0</span> / <span id="of-asks-depth">0</span></span>
+                                    </div>
+                                    <div class="depth-ratio-bar">
+                                        <div class="depth-bids-fill" id="of-depth-bids-bar" style="width: 50%;"></div>
+                                        <div class="depth-asks-fill" id="of-depth-asks-bar" style="width: 50%;"></div>
+                                    </div>
+                                </div>
+
+                                <div class="of-metric-group of-footer-metrics">
+                                    <div class="brain-row">
+                                        <span class="lbl">Binance Futures Lead-Lag</span>
+                                        <span class="val" id="of-futures-lead">+0.000%</span>
+                                    </div>
+                                    <div class="brain-row">
+                                        <span class="lbl">Realized Micro-Volatility</span>
+                                        <span class="val" id="of-volatility">0.00 bps</span>
+                                    </div>
+                                    <div class="brain-row">
+                                        <span class="lbl">Bid-Ask Spread</span>
+                                        <span class="val" id="of-spread">0.00 bps</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 3. Strategy Brain & Neural Memory Matrix -->
                         <div class="panel glass-panel brain-panel">
                             <div class="panel-header">
-                                <h3>Strategy Brain Status</h3>
+                                <h3>Strategy Brain & Memory</h3>
+                                <span class="badge badge-neutral" id="vault-dossier-pill">Obsidian Synced</span>
                             </div>
                             <div class="panel-body">
                                 <div class="brain-row"><span class="lbl">Signal Outcome</span><span class="val" id="brain-signal">WAITING</span></div>
                                 <div class="brain-row"><span class="lbl">Market Regime</span><span class="val" id="brain-regime">WAITING</span></div>
-                                <div class="brain-row"><span class="lbl">Strategy Mode</span><span class="val" id="brain-strategy-mode" class="text-neon">MACRO SWING</span></div>
+                                <div class="brain-row"><span class="lbl">Strategy Mode</span><span class="val text-neon" id="brain-strategy-mode">SNIPER (SPOT)</span></div>
                                 <div class="brain-row"><span class="lbl">MTF Bias</span><span class="val" id="brain-mtf">WAITING</span></div>
                                 <div class="brain-row"><span class="lbl">Confluence Score</span><span class="val" id="brain-score">0</span></div>
-                                <div class="brain-row"><span class="lbl">Next Scan</span><span class="val" id="brain-countdown">WAITING</span></div>
-                                <div class="brain-row"><span class="lbl">Scanning</span><span class="val" id="brain-scanning">None</span></div>
                                 
                                 <div class="brain-breakdown-container">
-                                    <div class="breakdown-title">Indicator Breakdown</div>
+                                    <div class="breakdown-title">Indicator Confluence</div>
                                     <div id="brain-breakdown"></div>
+                                </div>
+
+                                <div class="brain-memory-container">
+                                    <div class="breakdown-title" style="display:flex; justify-content:space-between;">
+                                        <span>Active Learned Penalties</span>
+                                        <span id="vault-count-badge" style="color:var(--text-secondary); font-size:0.65rem;">0 Vault Dossiers</span>
+                                    </div>
+                                    <div id="brain-penalties" class="penalties-list">
+                                        <span class="empty-penalty-tag">No active penalties (Optimal conditions)</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -137,7 +240,7 @@
                     <div class="bento-row bottom-row">
                         <div class="panel glass-panel list-panel">
                             <div class="panel-header">
-                                <h3>Active Trades</h3>
+                                <h3>Active Positions</h3>
                                 <div id="active-trades-split"></div>
                             </div>
                             <div class="panel-body scrollable" id="active-trade-container">

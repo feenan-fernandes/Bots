@@ -348,6 +348,134 @@ function updateDashboard(status, health) {
         pmToggle.checked = health.paper_mode;
     }
 
+    // ─── 1. Top Bar Telemetry Strip ───
+    if (status.dead_man_telemetry) {
+        const dms = status.dead_man_telemetry;
+        const dmsStatusEl = document.getElementById('val-dms-status');
+        const dmsMsEl = document.getElementById('val-dms-ms');
+        const dmsPulseEl = document.getElementById('dms-pulse');
+        if (dmsStatusEl) dmsStatusEl.textContent = dms.status;
+        if (dmsMsEl) dmsMsEl.textContent = `${dms.latency_ms}ms`;
+        if (dmsPulseEl) {
+            dmsPulseEl.className = 'pulse-dot ' + (dms.status === 'ARMED' ? 'active' : 'halted');
+        }
+    }
+
+    if (status.risk_telemetry) {
+        const risk = status.risk_telemetry;
+        const riskStatusEl = document.getElementById('val-risk-status');
+        const riskDdEl = document.getElementById('val-risk-dd');
+        if (riskStatusEl) {
+            riskStatusEl.textContent = risk.status;
+            riskStatusEl.className = risk.status === 'NOMINAL' ? 'text-neon' : 'neg';
+        }
+        if (riskDdEl) {
+            riskDdEl.textContent = `DD: ${risk.daily_drawdown_pct >= 0 ? '+' : ''}${risk.daily_drawdown_pct}%`;
+        }
+        
+        // Risk Exposure Card
+        const exposurePct = risk.max_exposure_usd > 0 ? Math.min(100, (risk.current_exposure_usd / risk.max_exposure_usd) * 100) : 0;
+        const expPctEl = document.getElementById('val-risk-exposure-pct');
+        if (expPctEl) expPctEl.textContent = `${exposurePct.toFixed(1)}%`;
+        const currDdEl = document.getElementById('val-risk-current-dd');
+        if (currDdEl) currDdEl.textContent = `${risk.daily_drawdown_pct >= 0 ? '+' : ''}${risk.daily_drawdown_pct}%`;
+        const riskBar = document.getElementById('val-risk-dd-bar');
+        if (riskBar) {
+            riskBar.style.width = Math.min(100, Math.abs(risk.daily_drawdown_pct / risk.max_drawdown_limit_pct) * 100) + '%';
+            riskBar.style.background = Math.abs(risk.daily_drawdown_pct) > 2.0 ? 'var(--danger)' : 'var(--accent-neon)';
+        }
+    }
+
+    if (status.broker_venue) {
+        const venueTag = document.getElementById('val-venue-tag');
+        if (venueTag) venueTag.textContent = status.broker_venue.primary.replace('_', ' ');
+    }
+
+    // ─── 2. Order Flow & Microstructure Telemetry ───
+    if (status.orderflow) {
+        const of = status.orderflow;
+        const focusSymEl = document.getElementById('of-focus-symbol');
+        if (focusSymEl) focusSymEl.textContent = of.symbol || 'BTCUSDT';
+
+        const microPriceEl = document.getElementById('of-micro-price');
+        if (microPriceEl) microPriceEl.textContent = `$${fmtCrypto(of.micro_price || of.mid_price)}`;
+
+        const midPriceEl = document.getElementById('of-mid-price');
+        if (midPriceEl) midPriceEl.textContent = `$${fmtCrypto(of.mid_price)}`;
+
+        const skewBadge = document.getElementById('of-skew-badge');
+        if (skewBadge) {
+            const skew = of.micro_skew_bps || 0.0;
+            skewBadge.textContent = `${skew >= 0 ? '+' : ''}${skew.toFixed(2)} bps`;
+            skewBadge.className = 'badge ' + (skew > 0.3 ? 'badge-success' : (skew < -0.3 ? 'badge-danger' : 'badge-neutral'));
+        }
+
+        const ofiValEl = document.getElementById('of-ofi-value');
+        if (ofiValEl) {
+            const ofi = of.ofi || 0.0;
+            ofiValEl.textContent = `${ofi >= 0 ? '+' : ''}${ofi.toFixed(3)} (${of.liquidity_skew || 'NEUTRAL'})`;
+            ofiValEl.style.color = ofi > 0.2 ? 'var(--success)' : (ofi < -0.2 ? 'var(--danger)' : 'var(--text-primary)');
+        }
+
+        // OFI Pointer Slider (-1.0 to +1.0 mapped to 5% to 95%)
+        const ofiPointer = document.getElementById('of-ofi-pointer');
+        if (ofiPointer) {
+            const ofi = of.ofi || 0.0;
+            const ofiPos = Math.max(5, Math.min(95, 50 + (ofi * 45)));
+            ofiPointer.style.left = ofiPos + '%';
+        }
+
+        // Depth Ratio Bar
+        const totalDepth = (of.total_bid_depth || 0) + (of.total_ask_depth || 0);
+        const bidPct = totalDepth > 0 ? (of.total_bid_depth / totalDepth) * 100 : 50;
+        const bidsBar = document.getElementById('of-depth-bids-bar');
+        const asksBar = document.getElementById('of-depth-asks-bar');
+        if (bidsBar && asksBar) {
+            bidsBar.style.width = bidPct + '%';
+            asksBar.style.width = (100 - bidPct) + '%';
+        }
+
+        const bidsDepthEl = document.getElementById('of-bids-depth');
+        const asksDepthEl = document.getElementById('of-asks-depth');
+        if (bidsDepthEl) bidsDepthEl.textContent = (of.total_bid_depth || 0).toFixed(2);
+        if (asksDepthEl) asksDepthEl.textContent = (of.total_ask_depth || 0).toFixed(2);
+
+        const futLeadEl = document.getElementById('of-futures-lead');
+        if (futLeadEl) {
+            const lead = of.futures_lead_pct || 0.0;
+            futLeadEl.textContent = `${lead >= 0 ? '+' : ''}${lead.toFixed(4)}%`;
+            futLeadEl.style.color = lead > 0.01 ? 'var(--success)' : (lead < -0.01 ? 'var(--danger)' : 'var(--text-secondary)');
+        }
+
+        const volEl = document.getElementById('of-volatility');
+        if (volEl) volEl.textContent = `${(of.realized_vol_bps || 0.0).toFixed(2)} bps`;
+
+        const spreadEl = document.getElementById('of-spread');
+        if (spreadEl) spreadEl.textContent = `${(of.spread_bps || 0.0).toFixed(2)} bps`;
+    }
+
+    // ─── 3. Neural Memory & Mistake Penalties ───
+    if (status.memory_telemetry) {
+        const mem = status.memory_telemetry;
+        const countBadge = document.getElementById('vault-count-badge');
+        if (countBadge) countBadge.textContent = `${mem.vault_dossier_count || 0} Vault Dossiers`;
+
+        const penaltiesContainer = document.getElementById('brain-penalties');
+        if (penaltiesContainer) {
+            if (mem.active_penalties && mem.active_penalties.length > 0) {
+                penaltiesContainer.innerHTML = mem.active_penalties.map(p => {
+                    const shortFp = p.fingerprint.split('::').slice(0, 3).join('::');
+                    return `<div class="penalty-tag">
+                        <span>${shortFp}</span>
+                        <span style="font-weight:700">${p.penalty} pts (${p.win_rate}% WR)</span>
+                    </div>`;
+                }).join('');
+            } else {
+                penaltiesContainer.innerHTML = `<span class="empty-penalty-tag">No active penalties (Optimal conditions)</span>`;
+            }
+        }
+    }
+
     if (status.halted) {
         sysPulse.classList.add('halted');
         sysPulse.classList.remove('active');

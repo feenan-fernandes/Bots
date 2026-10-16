@@ -147,9 +147,10 @@ h1, h2, h3, h4, h5, h6 {
 }
 .bento-row { display: flex; gap: 1.25rem; }
 .metrics-row .metric-card { flex: 1; }
-.middle-row { height: 420px; }
-.chart-panel { flex: 7; display: flex; flex-direction: column; }
-.brain-panel { flex: 3; display: flex; flex-direction: column; }
+.middle-row { height: 440px; }
+.chart-panel { flex: 5.2; display: flex; flex-direction: column; min-width: 0; }
+.orderflow-panel { flex: 2.4; display: flex; flex-direction: column; min-width: 0; }
+.brain-panel { flex: 2.4; display: flex; flex-direction: column; min-width: 0; }
 .bottom-row { height: 300px; }
 .list-panel { flex: 1; display: flex; flex-direction: column; }
 
@@ -286,3 +287,57 @@ input:checked + .slider:before { transform: translateX(16px); background-color: 
 
 /* Empty States */
 .empty-state { text-align: center; color: var(--text-muted); font-size: 0.85rem; padding: 2rem 0; font-style: italic; }
+
+/* ─── Institutional Telemetry Strip ─── */
+.telemetry-strip { display: flex; align-items: center; gap: 0.75rem; }
+.telemetry-pill {
+    display: flex; align-items: center; gap: 6px; padding: 4px 10px;
+    background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle);
+    border-radius: 20px; font-size: 0.75rem; font-family: var(--font-heading);
+}
+.telemetry-pill .pill-label { color: var(--text-secondary); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; }
+.telemetry-pill .pill-ms { color: var(--text-tertiary); font-size: 0.7rem; font-family: var(--font-body); }
+.telemetry-pill .pill-sub { color: var(--accent-blue); font-size: 0.7rem; font-weight: 600; }
+.dms-pill { border-color: rgba(57, 255, 20, 0.25); background: rgba(57, 255, 20, 0.05); }
+.risk-pill { border-color: rgba(0, 229, 255, 0.25); background: rgba(0, 229, 255, 0.05); }
+.venue-pill { border-color: rgba(255, 179, 0, 0.25); color: var(--warning); background: rgba(255, 179, 0, 0.05); }
+
+/* ─── Order Flow Microstructure Panel ─── */
+.orderflow-panel .panel-body { display: flex; flex-direction: column; gap: 0.75rem; }
+.of-metric-group { padding: 0.5rem 0; border-bottom: 1px solid rgba(255,255,255,0.03); }
+.of-label-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 0.8rem; font-family: var(--font-heading); }
+.of-label-row .lbl { color: var(--text-secondary); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; }
+.of-label-row .val { font-weight: 700; font-size: 0.95rem; }
+.of-sub-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px; }
+
+/* OFI Gauge Slider */
+.ofi-gauge-container { margin-top: 8px; }
+.ofi-gauge-bar {
+    position: relative; height: 8px; width: 100%; border-radius: 4px;
+    background: linear-gradient(90deg, #ff3366 0%, #30363d 50%, #00e676 100%);
+    overflow: visible;
+}
+.ofi-gauge-center { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 2px; background: rgba(255,255,255,0.6); transform: translateX(-50%); }
+.ofi-gauge-pointer {
+    position: absolute; top: -3px; width: 14px; height: 14px; border-radius: 50%;
+    background: #ffffff; box-shadow: 0 0 10px #ffffff; transform: translateX(-50%);
+    transition: left 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.ofi-gauge-labels { display: flex; justify-content: space-between; font-size: 0.65rem; font-family: var(--font-heading); font-weight: 700; margin-top: 6px; }
+
+/* Level-2 Depth Bar */
+.depth-ratio-bar { display: flex; height: 6px; width: 100%; border-radius: 3px; overflow: hidden; margin-top: 6px; background: rgba(255,255,255,0.05); }
+.depth-bids-fill { background: var(--success); transition: width 0.4s ease; }
+.depth-asks-fill { background: var(--danger); transition: width 0.4s ease; }
+.of-footer-metrics { margin-top: auto; padding-top: 0.5rem; border-top: 1px solid var(--border-subtle); border-bottom: none; }
+
+/* ─── Neural Memory & Mistake Penalties ─── */
+.brain-memory-container { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle); }
+.penalties-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; max-height: 90px; overflow-y: auto; }
+.penalty-tag {
+    display: flex; justify-content: space-between; align-items: center; padding: 3px 8px;
+    background: rgba(255, 51, 102, 0.08); border: 1px solid rgba(255, 51, 102, 0.25);
+    border-radius: 4px; font-size: 0.68rem; color: #ff8099; font-family: var(--font-heading);
+}
+.empty-penalty-tag { font-size: 0.7rem; color: var(--text-tertiary); font-style: italic; }
+

@@ -30,7 +30,7 @@ import webview
 from functools import wraps
 from flask_wtf.csrf import CSRFProtect, generate_csrf, CSRFError
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List
 import threading
 trade_lock = threading.Lock()
 import time
@@ -242,13 +242,74 @@ def status():
                 breakdown = {}
                 regime = "UNKNOWN"
                 
-            top_candidates.append({
-                "symbol": sym,
-                "score": score,
-                "breakdown": breakdown,
-                "regime": regime
+    # ─── Institutional Telemetry Collectors ───
+    # 1. Order Flow Snapshot for current focus asset
+    focus_sym = "BTCUSDT"
+    if state_mgr.open_trades:
+        focus_sym = state_mgr.open_trades[0]["symbol"]
+    elif state_mgr.last_analysis and state_mgr.last_analysis.get("symbol"):
+        focus_sym = state_mgr.last_analysis.get("symbol")
+        
+    from orderflow_engine import orderflow_engine
+    of_snapshot = orderflow_engine.get_orderflow_snapshot(broker_binance.client, focus_sym)
+
+    # 2. Pre-Trade Risk Engine Status
+    from pre_trade_risk import risk_gate
+    daily_pnl = float(stats.get("pnl_usd", 0.0))
+    daily_dd_pct = (daily_pnl / portfolio_usd * 100.0) if portfolio_usd > 0 else 0.0
+    current_exposure = sum(float(t.get("price", 0.0)) * float(t.get("qty", 0.0)) for t in state_mgr.open_trades)
+    
+    risk_telemetry = {
+        "daily_drawdown_pct": round(daily_dd_pct, 2),
+        "max_drawdown_limit_pct": round(risk_gate.limits.max_daily_drawdown_pct * 100.0, 1),
+        "current_exposure_usd": round(current_exposure, 2),
+        "max_exposure_usd": round(risk_gate.limits.max_portfolio_exposure_usd, 2),
+        "max_ticket_usd": round(risk_gate.limits.max_order_notional_usd, 2),
+        "status": "CIRCUIT_BREAKER_ACTIVE" if daily_dd_pct <= -risk_gate.limits.max_daily_drawdown_pct * 100.0 else "NOMINAL"
+    }
+
+    # 3. Dead-Man's Switch Pulse
+    import json
+    hb_file = os.path.join("output", "heartbeat.json")
+    dms_status = "STANDBY"
+    dms_latency_ms = 0
+    if os.path.exists(hb_file):
+        try:
+            with open(hb_file, "r") as f:
+                hb_data = json.load(f)
+            elapsed = time.time() - float(hb_data.get("timestamp", 0.0))
+            dms_latency_ms = int(elapsed * 1000)
+            dms_status = "ARMED" if elapsed < 3.5 else "TRIGGERED"
+        except Exception:
+            pass
+            
+    dead_man_telemetry = {
+        "status": dms_status,
+        "latency_ms": dms_latency_ms
+    }
+
+    # 4. Learning Memory & Neural Vault Telemetry
+    from learning_memory import learning_memory
+    active_penalties = []
+    for fp, rec in learning_memory.memory.items():
+        if rec.get("penalty", 0) != 0:
+            active_penalties.append({
+                "fingerprint": fp,
+                "penalty": rec["penalty"],
+                "win_rate": round(rec.get("win_rate", 0.0) * 100, 1),
+                "trades": rec.get("trades", 0)
             })
             
+    vault_dossier_count = 0
+    vault_trades_dir = os.path.join("Obsidian_Vault", "Trades")
+    if os.path.exists(vault_trades_dir):
+        vault_dossier_count = len([f for f in os.listdir(vault_trades_dir) if f.endswith(".md")])
+        
+    memory_telemetry = {
+        "active_penalties": active_penalties,
+        "vault_dossier_count": vault_dossier_count
+    }
+
     return jsonify({
         "open_trades":  state_mgr.open_trades,
         "daily_stats": stats,
@@ -261,7 +322,16 @@ def status():
         "next_scan_time": state_mgr.state.get("next_scan_time", 0),
         "portfolio_aed": portfolio_aed,
         "portfolio_usd": portfolio_usd,
-        "last_analysis": state_mgr.last_analysis
+        "last_analysis": state_mgr.last_analysis,
+        "orderflow": of_snapshot,
+        "risk_telemetry": risk_telemetry,
+        "dead_man_telemetry": dead_man_telemetry,
+        "memory_telemetry": memory_telemetry,
+        "broker_venue": {
+            "primary": "BINANCE_SPOT",
+            "mt5_available": True,
+            "mode": "SPOT" if not config.FUTURES_MODE else "FUTURES"
+        }
     })
 
 
