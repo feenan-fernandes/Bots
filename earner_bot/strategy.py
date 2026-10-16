@@ -290,9 +290,9 @@ def mean_reversion_alpha(df: pd.DataFrame) -> Tuple[str, int, Dict[str, Any]]:
             
     return "HOLD", 0, breakdown
 
-def get_signal(df: pd.DataFrame, regime: str, client=None, symbol: str = None) -> Dict[str, Any]:
+def get_signal(df: pd.DataFrame, regime: str, client=None, symbol: str = None, orderflow: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Main strategy router.
+    Main strategy router with Self-Learning Memory & Order Flow Integration.
     """
     if regime == "BLACK_SWAN":
         return {"signal": "HOLD", "score": 0, "breakdown": {}, "regime": regime}
@@ -304,12 +304,29 @@ def get_signal(df: pd.DataFrame, regime: str, client=None, symbol: str = None) -
         # Only allow NOISE trades with very high conviction (score >= 70)
         if score < 70:
             return {"signal": "HOLD", "score": score, "breakdown": breakdown, "regime": regime}
-        return {"signal": signal, "score": score, "breakdown": breakdown, "regime": regime}
-
-    if regime == "TRENDING":
+    elif regime == "TRENDING":
         signal, score, breakdown = trend_following_alpha(df)
     else:
         signal, score, breakdown = mean_reversion_alpha(df)
+
+    # Apply Self-Learning Memory Penalty / Boost
+    if signal in ["BUY", "SELL"]:
+        try:
+            from learning_memory import learning_memory
+            of = orderflow or {}
+            ofi_skew = of.get("liquidity_skew", "NEUTRAL")
+            cvd_delta = of.get("cvd_delta", 0.0)
+            cvd_aligned = (cvd_delta >= 0 if signal == "BUY" else cvd_delta <= 0)
+            
+            fingerprint = learning_memory.make_fingerprint(regime, signal, ofi_skew, cvd_aligned)
+            penalty = learning_memory.get_pattern_penalty(fingerprint)
+            
+            if penalty != 0:
+                score = max(0, min(100, score + penalty))
+                breakdown["learning_memory_adj"] = penalty
+                logger.info(f"Learning Memory applied {penalty:+d} pts to {symbol or 'SIGNAL'} [{fingerprint}] -> final score {score}")
+        except Exception as e:
+            logger.error(f"Error applying learning memory to signal: {e}")
 
     return {
         "signal": signal,

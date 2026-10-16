@@ -143,8 +143,9 @@ class StateManager:
         self.state["open_trades"] = value
 
     def add_open_trade(self, symbol: str, price: float, qty: float, regime: str,
-                       stop_loss: float, take_profit: float, atr: float, side: str = "LONG") -> None:
-        """Record a new trade with all protective levels."""
+                       stop_loss: float, take_profit: float, atr: float, side: str = "LONG",
+                       orderflow: Optional[Dict] = None, score: int = 0, breakdown: Optional[Dict] = None) -> None:
+        """Record a new trade with all protective levels and microstructure telemetry."""
         trade = {
             "symbol": symbol,
             "side": side,
@@ -156,7 +157,10 @@ class StateManager:
             "atr_at_entry": atr,
             "highest_price": price,
             "lowest_price": price,
-            "entry_time": datetime.now(timezone.utc).isoformat()
+            "entry_time": datetime.now(timezone.utc).isoformat(),
+            "orderflow": orderflow or {},
+            "score": score,
+            "breakdown": breakdown or {}
         }
         with self.lock:
             self.state["open_trades"].append(trade)

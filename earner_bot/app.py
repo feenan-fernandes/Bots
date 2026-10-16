@@ -548,7 +548,10 @@ def _evaluate_symbol_async(symbol: str, price: float = None):
             if regime == "BLACK_SWAN":
                 return
                 
-            signal_result = get_signal(df, regime, broker_binance.client, symbol)
+            from orderflow_engine import orderflow_engine
+            orderflow_snapshot = orderflow_engine.get_orderflow_snapshot(broker_binance.client, symbol)
+            
+            signal_result = get_signal(df, regime, broker_binance.client, symbol, orderflow=orderflow_snapshot)
             
             # Determine MTF and action for UI
             action = "WAITING"
@@ -642,11 +645,33 @@ def _evaluate_symbol_async(symbol: str, price: float = None):
                     dec_id = make_decision_id(symbol, str(df.index[-1]), regime, side)
                     if idem_guard.is_duplicate(dec_id):
                         return
+                    
+                    # ─── Hard Pre-Trade Risk Engine (Deterministic O(1) Checks) ───
+                    from pre_trade_risk import risk_gate
+                    current_mid = orderflow_snapshot.get("mid_price", price)
+                    prices_dict = {symbol: price}
+                    equity_usd = portfolio_value_usd(balances, prices_dict)
+                    daily_pnl = float(state_mgr.daily_stats.get("pnl_usd", 0.0))
+
+                    approved, risk_reason = risk_gate.evaluate_order(
+                        symbol=symbol,
+                        side=side,
+                        order_type="LIMIT",
+                        price=price,
+                        quantity=qty,
+                        current_mid=current_mid,
+                        daily_pnl_usd=daily_pnl,
+                        portfolio_equity_usd=equity_usd,
+                        open_trades=state_mgr.open_trades
+                    )
+                    if not approved:
+                        logger.warning(f"PRE-TRADE RISK REJECT for {symbol} ({side}): {risk_reason}")
+                        return
                         
                     if side == "BUY":
-                        execution_pool.submit(_execute_buy, symbol, price, qty, regime, df.iloc[-1]["ATR"], dec_id)
+                        execution_pool.submit(_execute_buy, symbol, price, qty, regime, df.iloc[-1]["ATR"], dec_id, orderflow_snapshot, signal_result["score"], signal_result.get("breakdown", {}))
                     else:
-                        execution_pool.submit(_execute_short, symbol, price, qty, regime, df.iloc[-1]["ATR"], dec_id)
+                        execution_pool.submit(_execute_short, symbol, price, qty, regime, df.iloc[-1]["ATR"], dec_id, orderflow_snapshot, signal_result["score"], signal_result.get("breakdown", {}))
                 
     except Exception as e:
         logger.error(f"Eval error for {symbol}: {e}")
@@ -699,6 +724,42 @@ def _execute_exit(trigger: str, trade: Dict, price: float, port_usd: float,
         )
         state_mgr.remove_trade(symbol)
 
+        # ─── Post-Mortem Autopsy & Self-Learning Adaptation ───
+        try:
+            from autopsy import autopsy_engine
+            from learning_memory import learning_memory
+            from obsidian_vault_mgr import vault_mgr
+            
+            entry_time = trade.get("ts", trade.get("entry_time", "Unknown"))
+            orderflow = trade.get("orderflow", {})
+            exit_data = {
+                "exit_price": actual_price,
+                "entry_price": entry_price,
+                "pnl_pct": pnl_pct,
+                "pnl_usd": pnl_usd,
+                "pnl_aed": pnl_usd * config.AED_USD_RATE,
+                "trigger": trigger,
+                "exit_time": datetime.now(timezone.utc).isoformat()
+            }
+            
+            autopsy_result = autopsy_engine.perform_autopsy(trade, exit_data, orderflow)
+            
+            # Record learning fingerprint
+            regime_val = trade.get("regime", regime)
+            trade_side = trade.get("side", "LONG")
+            ofi_skew = orderflow.get("liquidity_skew", "NEUTRAL")
+            cvd_delta = orderflow.get("cvd_delta", 0.0)
+            cvd_aligned = (cvd_delta >= 0 if trade_side in ["BUY", "LONG"] else cvd_delta <= 0)
+            
+            fingerprint = learning_memory.make_fingerprint(regime_val, trade_side, ofi_skew, cvd_aligned)
+            learning_memory.record_outcome(fingerprint, is_win=(pnl_usd > 0), pnl_usd=pnl_usd)
+            
+            # Archive Dossier to Obsidian Vault
+            trade_id = str(entry_time).replace(":", "_").replace("-", "_")
+            vault_mgr.record_trade_exit(trade_id, symbol, exit_data, autopsy_result)
+        except Exception as e:
+            logger.error(f"Error in autopsy/learning/vault recording: {e}")
+
         if dec_id:
             idem_guard.mark_executed(dec_id)
 
@@ -741,7 +802,8 @@ def _check_daily_summary(port_usd: float) -> None:
         send_daily_summary(stats, port_usd)
 
 
-def _execute_buy(symbol: str, price: float, qty: float, regime: str, current_atr: float, dec_id: str):
+def _execute_buy(symbol: str, price: float, qty: float, regime: str, current_atr: float, dec_id: str,
+                 orderflow: Optional[Dict] = None, score: int = 0, breakdown: Optional[Dict] = None):
     from broker_binance import execute_buy_safe, init_futures_margin, place_bracket_orders
     from risk import compute_stop_loss, compute_take_profit
     from notifier import send_trade_alert
@@ -764,7 +826,8 @@ def _execute_buy(symbol: str, price: float, qty: float, regime: str, current_atr
         state_mgr.add_open_trade(
             symbol=symbol, price=actual_price, qty=actual_qty, regime=regime,
             stop_loss=stop_loss, take_profit=take_profit,
-            atr=current_atr,
+            atr=current_atr, side="LONG",
+            orderflow=orderflow, score=score, breakdown=breakdown
         )
         idem_guard.mark_executed(dec_id)
         audit("BUY", {
@@ -774,8 +837,20 @@ def _execute_buy(symbol: str, price: float, qty: float, regime: str, current_atr
         trade_logger.info(f"BUY EXECUTION | SYMBOL: {symbol} | QTY: {actual_qty:.6f} | PRICE: ${actual_price:.2f} | STOP: ${stop_loss:.2f}")
         send_trade_alert("BUY", actual_qty, actual_price, regime, config.PAPER_MODE)
 
+        # Archive Entry to Obsidian Vault
+        try:
+            from obsidian_vault_mgr import vault_mgr
+            vault_mgr.record_trade_entry(dec_id, {
+                "symbol": symbol, "side": "BUY", "price": actual_price, "qty": actual_qty,
+                "regime": regime, "stop_loss": stop_loss, "take_profit": take_profit,
+                "atr": current_atr, "score": score, "breakdown": breakdown
+            }, orderflow=orderflow)
+        except Exception as e:
+            logger.error(f"Error recording entry to Obsidian vault: {e}")
 
-def _execute_short(symbol: str, price: float, qty: float, regime: str, current_atr: float, dec_id: str):
+
+def _execute_short(symbol: str, price: float, qty: float, regime: str, current_atr: float, dec_id: str,
+                  orderflow: Optional[Dict] = None, score: int = 0, breakdown: Optional[Dict] = None):
     from broker_binance import execute_sell_safe, init_futures_margin, place_bracket_orders
     from risk import compute_stop_loss, compute_take_profit
     from notifier import send_trade_alert
@@ -798,7 +873,8 @@ def _execute_short(symbol: str, price: float, qty: float, regime: str, current_a
         state_mgr.add_open_trade(
             symbol=symbol, price=actual_price, qty=actual_qty, regime=regime,
             stop_loss=stop_loss, take_profit=take_profit,
-            atr=current_atr, side="SHORT"
+            atr=current_atr, side="SHORT",
+            orderflow=orderflow, score=score, breakdown=breakdown
         )
         idem_guard.mark_executed(dec_id)
         audit("SHORT", {
@@ -807,6 +883,17 @@ def _execute_short(symbol: str, price: float, qty: float, regime: str, current_a
         })
         trade_logger.info(f"SHORT EXECUTION | SYMBOL: {symbol} | QTY: {actual_qty:.6f} | PRICE: ${actual_price:.2f} | STOP: ${stop_loss:.2f}")
         send_trade_alert("SHORT", actual_qty, actual_price, regime, config.PAPER_MODE)
+
+        # Archive Entry to Obsidian Vault
+        try:
+            from obsidian_vault_mgr import vault_mgr
+            vault_mgr.record_trade_entry(dec_id, {
+                "symbol": symbol, "side": "SHORT", "price": actual_price, "qty": actual_qty,
+                "regime": regime, "stop_loss": stop_loss, "take_profit": take_profit,
+                "atr": current_atr, "score": score, "breakdown": breakdown
+            }, orderflow=orderflow)
+        except Exception as e:
+            logger.error(f"Error recording entry to Obsidian vault: {e}")
 
 
 @app.route("/api/analytics")
@@ -883,8 +970,24 @@ def get_analytics():
 if __name__ == "__main__":
     ws_engine.start()
     
-    # Start autonomous scanner loop
+    # Start Dead-Man's Switch Heartbeat Emitter Loop (every 500ms)
+    def _heartbeat_loop():
+        from dead_mans_switch import DeadMansSwitch
+        dms = DeadMansSwitch()
+        while True:
+            try:
+                active_syms = [t["symbol"] for t in state_mgr.open_trades]
+                dms.emit_heartbeat(active_syms)
+            except Exception:
+                pass
+            import time
+            time.sleep(0.5)
+
     from threading import Thread
+    heartbeat_thread = Thread(target=_heartbeat_loop, daemon=True)
+    heartbeat_thread.start()
+    
+    # Start autonomous scanner loop
     scanner_thread = Thread(target=_scanner_loop, daemon=True)
     scanner_thread.start()
     
