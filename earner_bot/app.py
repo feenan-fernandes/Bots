@@ -1096,5 +1096,5 @@ if __name__ == "__main__":
             logger.info("Ouroboros server shutting down...")
     else:
         # Launch pywebview window
-        webview.create_window("Ouroboros Algo Trading", "http://127.0.0.1:8080")
+        webview.create_window("Ouroboros Algo Trading", "http://127.0.0.1:8080", width=1440, height=900, min_size=(1024, 600))
         webview.start(private_mode=False)

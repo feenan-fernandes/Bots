@@ -27,29 +27,6 @@
             </div>
             
             <div class="nav-right">
-                <!-- Institutional Telemetry Strip -->
-                <div class="telemetry-strip">
-                    <div class="telemetry-pill dms-pill" title="Independent External Dead-Man's Switch Failsafe">
-                        <div class="pulse-dot" id="dms-pulse"></div>
-                        <span class="pill-label">DMS:</span>
-                        <span id="val-dms-status">ARMED</span>
-                        <span class="pill-ms" id="val-dms-ms">350ms</span>
-                    </div>
-
-                    <div class="telemetry-pill risk-pill" title="Deterministic Pre-Trade Risk Engine">
-                        <span class="pill-label">Risk Gate:</span>
-                        <span id="val-risk-status" class="text-neon">NOMINAL</span>
-                        <span class="pill-sub" id="val-risk-dd">DD: 0.0%</span>
-                    </div>
-
-                    <div class="telemetry-pill venue-pill" title="Active Execution Venue">
-                        <span class="pill-label">Venue:</span>
-                        <span id="val-venue-tag">BINANCE SPOT</span>
-                    </div>
-                </div>
-                
-                <div class="nav-divider"></div>
-                
                 <!-- Live Bot Status Indicator -->
                 <div class="status-indicator bot-status-pill" id="bot-status-container" title="Bot Autotrading Engine State">
                     <div class="pulse-dot" id="system-pulse"></div>
@@ -81,6 +58,37 @@
                 </button>
             </div>
         </nav>
+
+        <!-- Institutional Telemetry Ribbon -->
+        <div class="telemetry-bar">
+            <div class="telemetry-left">
+                <div class="telemetry-pill dms-pill" title="Independent External Dead-Man's Switch Failsafe">
+                    <div class="pulse-dot" id="dms-pulse"></div>
+                    <span class="pill-label">DMS:</span>
+                    <span id="val-dms-status">ARMED</span>
+                    <span class="pill-ms" id="val-dms-ms">350ms</span>
+                </div>
+
+                <div class="telemetry-pill risk-pill" title="Deterministic Pre-Trade Risk Engine">
+                    <span class="pill-label">Risk Gate:</span>
+                    <span id="val-risk-status" class="text-neon">NOMINAL</span>
+                    <span class="pill-sub" id="val-risk-dd">DD: 0.0%</span>
+                </div>
+
+                <div class="telemetry-pill venue-pill" title="Active Execution Venue">
+                    <span class="pill-label">Venue:</span>
+                    <span id="val-venue-tag">BINANCE SPOT</span>
+                </div>
+            </div>
+
+            <div class="telemetry-right">
+                <span class="telemetry-tag">ENGINE: <strong class="text-neon">AETHERIS 3.2 QUANT</strong></span>
+                <span class="telemetry-divider">•</span>
+                <span class="telemetry-tag">EXECUTION: <strong>MICROSTRUCTURE L2</strong></span>
+                <span class="telemetry-divider">•</span>
+                <span class="telemetry-tag">FAILSAFE: <strong class="pos">ONLINE</strong></span>
+            </div>
+        </div>
 
         <!-- Main Content Area -->
         <main class="main-content">

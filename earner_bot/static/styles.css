@@ -78,13 +78,13 @@ h1, h2, h3, h4, h5, h6 {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.75rem 2rem;
+    padding: 0.65rem 2rem;
     z-index: 100;
     flex-wrap: nowrap;
     position: sticky;
     top: 0;
     border-bottom: 1px solid var(--border-subtle);
-    background: rgba(8, 12, 18, 0.92);
+    background: rgba(8, 12, 18, 0.95);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
 }
@@ -92,22 +92,23 @@ h1, h2, h3, h4, h5, h6 {
 .nav-left {
     display: flex;
     align-items: center;
-    gap: 1.5rem;
+    gap: 1.25rem;
     flex-shrink: 0;
 }
 
 .nav-right {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 0.85rem;
     flex-shrink: 0;
+    margin-left: auto;
 }
 
 .logo-container {
     display: flex;
     align-items: center;
     gap: 12px;
-    margin-right: 2rem;
+    margin-right: 1.25rem;
 }
 .logo-icon {
     width: 32px; height: 32px;
@@ -452,12 +453,44 @@ input:checked + .slider:before { transform: translateX(16px); background-color: 
 /* Empty States */
 .empty-state { text-align: center; color: var(--text-muted); font-size: 0.85rem; padding: 2rem 0; font-style: italic; }
 
-/* ─── Institutional Telemetry Strip ─── */
+/* ─── Institutional Telemetry Ribbon ─── */
+.telemetry-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.35rem 2rem;
+    background: rgba(6, 10, 16, 0.85);
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: 0.75rem;
+    font-family: var(--font-heading);
+    z-index: 95;
+    flex-shrink: 0;
+}
+.telemetry-left {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: nowrap;
+}
+.telemetry-right {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: var(--text-tertiary);
+    font-size: 0.7rem;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+.telemetry-right strong { color: var(--text-secondary); }
+.telemetry-divider { color: var(--border-subtle); opacity: 0.7; }
+.telemetry-tag { display: flex; align-items: center; gap: 4px; }
+
 .telemetry-strip { display: flex; align-items: center; gap: 0.75rem; }
 .telemetry-pill {
     display: flex; align-items: center; gap: 6px; padding: 4px 10px;
     background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle);
     border-radius: 20px; font-size: 0.75rem; font-family: var(--font-heading);
+    white-space: nowrap;
 }
 .telemetry-pill .pill-label { color: var(--text-secondary); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; }
 .telemetry-pill .pill-ms { color: var(--text-tertiary); font-size: 0.7rem; font-family: var(--font-body); }
@@ -506,22 +539,35 @@ input:checked + .slider:before { transform: translateX(16px); background-color: 
 .empty-penalty-tag { font-size: 0.7rem; color: var(--text-tertiary); font-style: italic; }
 
 /* ─── Responsive Media Queries ─── */
-@media (max-width: 1440px) {
-    .top-nav { padding: 0.65rem 1.25rem; }
-    .nav-left, .nav-right { gap: 0.85rem; }
-    .action-buttons { gap: 0.5rem; }
-    .btn { padding: 0.45rem 0.85rem; font-size: 0.75rem; }
-    .bot-status-pill { padding: 0.38rem 0.75rem; font-size: 0.72rem; }
-    .logout-btn { padding: 0.42rem 0.7rem; font-size: 0.72rem; }
+@media (max-width: 1300px) {
+    .top-nav { padding: 0.6rem 1.25rem; }
+    .telemetry-bar { padding: 0.35rem 1.25rem; }
+    .nav-left { gap: 1rem; }
+    .logo-container { margin-right: 0.75rem; }
+    .nav-right { gap: 0.65rem; }
+    .btn { padding: 0.44rem 0.8rem; font-size: 0.75rem; }
+    .bot-status-pill { padding: 0.38rem 0.75rem; font-size: 0.74rem; }
+    .logout-btn { padding: 0.44rem 0.7rem; font-size: 0.74rem; }
 }
 
-@media (max-width: 1200px) {
-    .telemetry-strip { display: none; }
+@media (max-width: 1050px) {
+    .top-nav { padding: 0.5rem 1rem; }
+    .telemetry-bar { padding: 0.3rem 1rem; }
+    .nav-left { gap: 0.6rem; }
+    .logo-container { margin-right: 0.5rem; }
+    .logo-text span { display: none; }
+    .nav-links li { padding: 0.35rem 0.65rem; font-size: 0.8rem; }
+    .nav-right { gap: 0.5rem; }
+    .action-buttons { gap: 0.35rem; }
+    .btn { padding: 0.4rem 0.65rem; font-size: 0.72rem; }
+    .bot-status-pill { padding: 0.35rem 0.6rem; font-size: 0.7rem; }
+    .logout-btn { padding: 0.4rem 0.6rem; font-size: 0.7rem; }
+    .telemetry-right { display: none; }
 }
 
-@media (max-width: 900px) {
-    .paper-toggle-container { display: none; }
-    .top-nav { flex-wrap: wrap; gap: 0.5rem; }
+@media (max-width: 850px) {
+    .paper-toggle-container label:first-child { display: none; }
+    .logout-btn span { display: none; }
 }
 
 
