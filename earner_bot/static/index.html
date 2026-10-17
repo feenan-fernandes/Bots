@@ -17,7 +17,7 @@
                     <div class="logo-icon">
                         <img src="/ouroboros_logo.jpg" alt="Ouroboros Logo">
                     </div>
-                    <div class="logo-text">Ouroboros <span>3.2 Quant</span></div>
+                    <div class="logo-text">Ouroboros <span class="logo-sub">3.2</span></div>
                 </div>
                 <ul class="nav-links">
                     <li class="active" id="nav-dashboard">Dashboard</li>
@@ -30,30 +30,26 @@
                 <!-- Live Bot Status Indicator -->
                 <div class="status-indicator bot-status-pill" id="bot-status-container" title="Bot Autotrading Engine State">
                     <div class="pulse-dot" id="system-pulse"></div>
-                    <span id="system-status-text">Autotrading Active (Paper)</span>
+                    <span id="system-status-text">Paper Active</span>
                 </div>
 
-                <div class="nav-divider"></div>
-
-                <div class="paper-toggle-container" title="Toggle between simulated paper execution and real exchange orders">
-                    <label for="paper_mode_toggle">Paper Mode</label>
+                <div class="paper-toggle-container" title="Toggle Paper / Live Execution">
+                    <span class="paper-label">Paper</span>
                     <label class="switch">
                         <input type="checkbox" id="paper_mode_toggle">
                         <span class="slider round"></span>
                     </label>
                 </div>
-                
-                <div class="nav-divider"></div>
 
                 <div class="action-buttons">
-                    <button class="btn btn-primary" id="btn-run" title="Force immediate scanning & execution cycle">Force Scan</button>
-                    <button class="btn btn-secondary" id="btn-refresh" title="Refresh UI data & charts">Refresh UI</button>
-                    <button class="btn btn-danger" id="btn-emergency" title="Emergency halt bot and liquidate open positions">Emergency Close</button>
-                    <button class="btn btn-primary" id="btn-resume" style="display: none;" title="Resume bot automated trading">Resume Bot</button>
+                    <button class="btn btn-primary" id="btn-run" title="Force immediate scanning & execution cycle">Scan</button>
+                    <button class="btn btn-secondary" id="btn-refresh" title="Refresh UI data & charts">Refresh</button>
+                    <button class="btn btn-danger" id="btn-emergency" title="Emergency halt bot and liquidate open positions">Emergency</button>
+                    <button class="btn btn-primary" id="btn-resume" style="display: none;" title="Resume bot automated trading">Resume</button>
                 </div>
                 
                 <button id="nav-logout" class="logout-btn" title="Sign out / Lock Terminal">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                     <span>Logout</span>
                 </button>
             </div>

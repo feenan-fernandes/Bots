@@ -197,7 +197,7 @@ function initChart() {
         series: [],
         chart: {
             type: 'candlestick',
-            height: 360,
+            height: '100%',
             background: 'transparent',
             toolbar: { show: false },
             animations: { enabled: true, dynamicAnimation: { speed: 400 } },
@@ -324,7 +324,7 @@ async function fetchStatus() {
             sysPulse.classList.add('halted');
             sysPulse.classList.remove('active');
         }
-        if (sysStatusText) sysStatusText.textContent = 'Disconnected';
+        if (sysStatusText) sysStatusText.textContent = 'Offline';
         const botStatusCont = document.getElementById('bot-status-container');
         if (botStatusCont) botStatusCont.classList.add('is-halted');
     }
@@ -505,7 +505,7 @@ function updateDashboard(status, health) {
             sysPulse.classList.add('halted');
             sysPulse.classList.remove('active');
         }
-        if (sysStatusText) sysStatusText.textContent = 'Bot Halted';
+        if (sysStatusText) sysStatusText.textContent = 'Halted';
         if (botStatusCont) botStatusCont.classList.add('is-halted');
         btnEmergency.style.display = 'none';
         btnResume.style.display = 'inline-flex';
@@ -514,7 +514,7 @@ function updateDashboard(status, health) {
             sysPulse.classList.remove('halted');
             sysPulse.classList.add('active');
         }
-        if (sysStatusText) sysStatusText.textContent = health.paper_mode ? 'Autotrading Active (Paper)' : 'Autotrading Active (Live)';
+        if (sysStatusText) sysStatusText.textContent = health.paper_mode ? 'Paper Active' : 'Live Active';
         if (botStatusCont) botStatusCont.classList.remove('is-halted');
         btnEmergency.style.display = 'inline-flex';
         btnResume.style.display = 'none';
