@@ -476,6 +476,24 @@ function updateDashboard(status, health) {
         }
     }
 
+    // ─── 4. AETHERIS Micro-Alpha Strategy Telemetry ───
+    if (status.aetheris_telemetry) {
+        const aeth = status.aetheris_telemetry;
+        const aethDislocEl = document.getElementById('aetheris-disloc-val');
+        if (aethDislocEl) {
+            let sigColor = aeth.signal === 'BUY' ? 'var(--success)' : (aeth.signal === 'SELL' ? 'var(--danger)' : 'var(--accent-neon)');
+            aethDislocEl.innerHTML = `<span style="color:${sigColor}; font-weight:700;">${aeth.dislocation >= 0 ? '+' : ''}${aeth.dislocation.toFixed(2)} (${aeth.signal})</span>`;
+        }
+        const aethCavitEl = document.getElementById('aetheris-cavitation-val');
+        if (aethCavitEl) {
+            if (aeth.is_cavitation) {
+                aethCavitEl.innerHTML = `<span class="badge badge-danger">VACUUM CAVITATED</span>`;
+            } else {
+                aethCavitEl.innerHTML = `<span style="color:var(--text-secondary); font-size:0.75rem;">Conc: ${(aeth.entropy_concentration * 100).toFixed(0)}% (R:R ${aeth.rr_ratio}x)</span>`;
+            }
+        }
+    }
+
     if (status.halted) {
         sysPulse.classList.add('halted');
         sysPulse.classList.remove('active');

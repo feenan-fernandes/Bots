@@ -34,7 +34,8 @@ class PreTradeRiskEngine:
         current_mid: float,
         daily_pnl_usd: float,
         portfolio_equity_usd: float,
-        open_trades: Optional[List[Dict[str, Any]]] = None
+        open_trades: Optional[List[Dict[str, Any]]] = None,
+        timestamp: Optional[float] = None
     ) -> Tuple[bool, str]:
         """
         Executes strict, deterministic O(1) in-memory checks.
@@ -45,7 +46,7 @@ class PreTradeRiskEngine:
             return False, "INVALID_PRICE_OR_QUANTITY"
 
         order_notional = price * quantity
-        now_sec = int(time.time())
+        now_sec = int(timestamp if timestamp is not None else time.time())
 
         # 1. Daily Drawdown Circuit Breaker (Hard Halt)
         if portfolio_equity_usd > 0:

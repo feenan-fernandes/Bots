@@ -11,7 +11,7 @@ entry_price: 68000.0000
 qty: 0.100000
 regime: "TRENDING"
 score: 85
-entry_time: "2026-10-16T20:54:07.856115+00:00"
+entry_time: "2026-10-17T05:18:02.230813+00:00"
 tags:
   - trade
   - BTCUSDT
@@ -32,8 +32,8 @@ tags:
 - **Position Size**: `0.100000 BTC` (~`$6800.00 USD`)
 - **Market Regime**: [[Regime_TRENDING]]
 - **Confluence Score**: `85/100`
-- **Execution Timestamp**: `2026-10-16T20:54:07.856115+00:00`
-- **Daily Journal**: [[Daily_2026-10-16]]
+- **Execution Timestamp**: `2026-10-17T05:18:02.230813+00:00`
+- **Daily Journal**: [[Daily_2026-10-17]]
 
 ---
 
@@ -73,7 +73,7 @@ The bot captured the following microsecond order book metrics directly prior to 
 ---
 
 ## 🏁 Trade Closure & Execution Telemetry
-- **Exit Timestamp**: `2026-10-16T20:54:07.857114+00:00`
+- **Exit Timestamp**: `2026-10-17T05:18:02.240809+00:00`
 - **Exit Trigger**: `STOP_LOSS`
 - **Exit Price**: `$67200.0000`
 - **Net PnL %**: `-1.37%`

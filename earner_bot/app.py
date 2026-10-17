@@ -310,6 +310,22 @@ def status():
         "vault_dossier_count": vault_dossier_count
     }
 
+    # 5. AETHERIS Micro-Alpha Strategy Telemetry
+    from aetheris_engine import aetheris_engine
+    aeth_state = aetheris_engine.update_and_evaluate(of_snapshot)
+    aetheris_telemetry = {
+        "dislocation": aeth_state.hydrodynamic_dislocation,
+        "threshold": aeth_state.phase_transition_threshold,
+        "is_cavitation": aeth_state.is_cavitation_vacuum,
+        "entropy_concentration": aeth_state.entropy_concentration,
+        "viscosity": aeth_state.liquidity_viscosity,
+        "signal": aeth_state.signal,
+        "confidence": aeth_state.confidence_score,
+        "structural_sl": aeth_state.density_stop_loss,
+        "cavitation_tp": aeth_state.cavitation_take_profit,
+        "rr_ratio": aeth_state.risk_reward_ratio
+    }
+
     return jsonify({
         "open_trades":  state_mgr.open_trades,
         "daily_stats": stats,
@@ -327,6 +343,7 @@ def status():
         "risk_telemetry": risk_telemetry,
         "dead_man_telemetry": dead_man_telemetry,
         "memory_telemetry": memory_telemetry,
+        "aetheris_telemetry": aetheris_telemetry,
         "broker_venue": {
             "primary": "BINANCE_SPOT",
             "mt5_available": True,

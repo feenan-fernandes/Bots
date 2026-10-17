@@ -117,6 +117,65 @@ if os.path.exists(test_heartbeat_path):
 
 print(">>> Dead-Man's Switch Verification Passed! <<<")
 
+# --- 4. Test AETHERIS Micro-Alpha Quantitative Strategy Engine ---
+print("\n[4] Testing AETHERIS Micro-Alpha Strategy Engine...")
+from aetheris_engine import AetherisAlphaEngine, QueueEntropyEstimator
+import pandas as pd
+from strategy import get_signal
+
+# Test 4.1: Queue Shannon Entropy
+entropy, concentration = QueueEntropyEstimator.compute_shannon_entropy([50.0, 1.0, 1.0, 0.5])
+print(f"Entropy Concentration Factor: {concentration:.3f}")
+assert concentration > 0.3, "Concentration factor should detect concentrated queue"
+
+# Test 4.2: Supercritical Phase Transition Evaluation
+aeth_engine = AetherisAlphaEngine(symbol="BTCUSDT")
+for i in range(20):
+    aeth_engine.update_and_evaluate({
+        "timestamp": 1700000000 + i,
+        "mid_price": 68000.0,
+        "micro_price": 68000.0,
+        "ofi": 0.0,
+        "spread_bps": 2.0,
+        "total_bid_depth": 50.0,
+        "total_ask_depth": 50.0,
+        "futures_lead_pct": 0.0,
+        "top_bids": [[67999.0, 25.0]],
+        "top_asks": [[68001.0, 25.0]]
+    })
+
+sweep_snapshot = {
+    "timestamp": 1700000025,
+    "mid_price": 68020.0,
+    "micro_price": 68026.0,
+    "ofi": 0.90,
+    "spread_bps": 1.5,
+    "total_bid_depth": 140.0,
+    "total_ask_depth": 6.0,
+    "futures_lead_pct": 0.04,
+    "top_bids": [[68019.0, 50.0], [68015.0, 60.0]],
+    "top_asks": [[68021.0, 2.0], [68025.0, 4.0]]
+}
+a_state = aeth_engine.update_and_evaluate(sweep_snapshot)
+print(f"Aetheris Signal: {a_state.signal}, Score: {a_state.confidence_score}, Cavitation: {a_state.is_cavitation_vacuum}")
+print(f"Structural SL: ${a_state.density_stop_loss:.2f}, Cavitation TP: ${a_state.cavitation_take_profit:.2f}, R:R: {a_state.risk_reward_ratio}")
+assert a_state.signal == "BUY", "Aetheris should trigger BUY on supercritical bid sweep"
+assert a_state.confidence_score >= 80, "Score should be high conviction"
+assert a_state.risk_reward_ratio >= 2.0, "R:R ratio must be >= 2.0"
+
+# Test 4.3: Integration with strategy.py get_signal
+dummy_df = pd.DataFrame([{
+    "open": 68000.0, "high": 68050.0, "low": 67950.0, "close": 68020.0,
+    "volume": 100.0, "VWAP": 68000.0, "VWAP_Z": 0.5, "RSI": 55.0,
+    "delta": 10.0, "delta_MA": 5.0, "ATR": 50.0, "Kalman": 68015.0
+}])
+sig_result = get_signal(dummy_df, regime="TRENDING", symbol="BTCUSDT", orderflow=sweep_snapshot)
+assert sig_result["signal"] == "BUY", "Strategy router should adopt Aetheris supercritical BUY"
+assert "aetheris" in sig_result, "Signal result must contain aetheris telemetry"
+print(f"Integrated Signal Router Result: {sig_result['signal']} (Score: {sig_result['score']})")
+print(">>> AETHERIS Micro-Alpha Strategy Verification Passed! <<<")
+
 print("\n=======================================================")
 print("  ALL INSTITUTIONAL PRODUCTION TESTS PASSED (100%)")
 print("=======================================================")
+

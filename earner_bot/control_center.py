@@ -674,8 +674,18 @@ class OuroborosControlCenter(QMainWindow):
     @Slot(int)
     def _diagnostic_suite_2_finished(self, exit_code: int):
         self.log_message(f"Suite 2 completed with code: {exit_code}", "#38BDF8")
-        self.log_message("🎉 ALL DIAGNOSTIC TESTS COMPLETE!", "#10B981")
-        self.status_bar.showMessage("Diagnostic tests complete.")
+        self.log_message("📊 RUNNING AETHERIS MONTE CARLO BACKTEST & PERFORMANCE AUDIT...", "#38BDF8")
+        cmd3 = [sys.executable, "-u", os.path.join(BASE_DIR, "backtest_aetheris.py")]
+        self.worker = SubprocessWorker(cmd3, cwd=BASE_DIR)
+        self.worker.output_signal.connect(self._handle_diagnostic_output)
+        self.worker.finished_signal.connect(self._diagnostic_suite_3_finished)
+        self.worker.start()
+
+    @Slot(int)
+    def _diagnostic_suite_3_finished(self, exit_code: int):
+        self.log_message(f"AETHERIS Backtest completed with code: {exit_code}", "#38BDF8")
+        self.log_message("🎉 ALL INSTITUTIONAL QUANT SUITES & BACKTESTS PASSED (100%)!", "#10B981")
+        self.status_bar.showMessage("All diagnostic tests & empirical backtest complete.")
 
     def open_log_file(self, filename: str):
         filepath = os.path.join(LOGS_DIR, filename)

@@ -309,6 +309,39 @@ def get_signal(df: pd.DataFrame, regime: str, client=None, symbol: str = None, o
     else:
         signal, score, breakdown = mean_reversion_alpha(df)
 
+    # ─── AETHERIS Micro-Alpha Phase Transition Evaluation ───
+    aetheris_telemetry = None
+    if orderflow:
+        try:
+            from aetheris_engine import aetheris_engine
+            a_state = aetheris_engine.update_and_evaluate(
+                orderflow,
+                candle_features={"regime": regime}
+            )
+            aetheris_telemetry = {
+                "dislocation": a_state.hydrodynamic_dislocation,
+                "threshold": a_state.phase_transition_threshold,
+                "is_cavitation": a_state.is_cavitation_vacuum,
+                "entropy_concentration": a_state.entropy_concentration,
+                "viscosity": a_state.liquidity_viscosity,
+                "signal": a_state.signal,
+                "confidence": a_state.confidence_score,
+                "structural_sl": a_state.density_stop_loss,
+                "cavitation_tp": a_state.cavitation_take_profit,
+                "rr_ratio": a_state.risk_reward_ratio
+            }
+            # Supercritical Phase Transition Priority:
+            if a_state.signal in ["BUY", "SELL"] and a_state.confidence_score >= 80:
+                if signal == "HOLD" or signal == a_state.signal:
+                    signal = a_state.signal
+                    score = max(score, a_state.confidence_score)
+                    breakdown["aetheris_dislocation"] = int(a_state.confidence_score * 0.5)
+                    breakdown["aetheris_concentration"] = int(a_state.entropy_concentration * 30)
+                    if a_state.is_cavitation_vacuum:
+                        breakdown["aetheris_cavitation"] = 20
+        except Exception as e:
+            logger.error(f"Aetheris evaluation error: {e}")
+
     # Apply Self-Learning Memory Penalty / Boost
     if signal in ["BUY", "SELL"]:
         try:
@@ -333,6 +366,7 @@ def get_signal(df: pd.DataFrame, regime: str, client=None, symbol: str = None, o
         "score": score,
         "breakdown": breakdown,
         "regime": regime,
+        "aetheris": aetheris_telemetry,
     }
 
 def multi_timeframe_gate(client, symbol: str) -> str:

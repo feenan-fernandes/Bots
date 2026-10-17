@@ -84,10 +84,11 @@ if exist "%~dp0output\run.log" start notepad "%~dp0output\run.log"
 goto menu
 
 :test_verify
-echo Running Full Institutional Test Suite...
+echo Running Full Institutional Test Suite & AETHERIS Backtest...
 cd /d "%~dp0"
 python test_institutional_architecture.py
 python test_self_learning_vault.py
+python backtest_aetheris.py
 echo.
 pause
 goto menu
