@@ -320,8 +320,13 @@ async function fetchStatus() {
             return;
         }
         console.error("Dashboard update failed:", e);
-        sysPulse.classList.add('halted');
-        sysStatusText.textContent = 'Disconnected';
+        if (sysPulse) {
+            sysPulse.classList.add('halted');
+            sysPulse.classList.remove('active');
+        }
+        if (sysStatusText) sysStatusText.textContent = 'Disconnected';
+        const botStatusCont = document.getElementById('bot-status-container');
+        if (botStatusCont) botStatusCont.classList.add('is-halted');
     }
 }
 
@@ -494,16 +499,23 @@ function updateDashboard(status, health) {
         }
     }
 
+    const botStatusCont = document.getElementById('bot-status-container');
     if (status.halted) {
-        sysPulse.classList.add('halted');
-        sysPulse.classList.remove('active');
-        sysStatusText.textContent = 'Bot Halted';
+        if (sysPulse) {
+            sysPulse.classList.add('halted');
+            sysPulse.classList.remove('active');
+        }
+        if (sysStatusText) sysStatusText.textContent = 'Bot Halted';
+        if (botStatusCont) botStatusCont.classList.add('is-halted');
         btnEmergency.style.display = 'none';
         btnResume.style.display = 'inline-flex';
     } else {
-        sysPulse.classList.remove('halted');
-        sysPulse.classList.add('active');
-        sysStatusText.textContent = health.paper_mode ? 'Autotrading Active (Paper)' : 'Autotrading Active (Live)';
+        if (sysPulse) {
+            sysPulse.classList.remove('halted');
+            sysPulse.classList.add('active');
+        }
+        if (sysStatusText) sysStatusText.textContent = health.paper_mode ? 'Autotrading Active (Paper)' : 'Autotrading Active (Live)';
+        if (botStatusCont) botStatusCont.classList.remove('is-halted');
         btnEmergency.style.display = 'inline-flex';
         btnResume.style.display = 'none';
     }
