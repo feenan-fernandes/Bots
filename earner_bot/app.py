@@ -1084,6 +1084,8 @@ if __name__ == "__main__":
         
     t = threading.Thread(target=start_server)
     t.daemon = True
+    t.start()
+    
     import sys
     if "--headless" in sys.argv or os.environ.get("OUROBOROS_HEADLESS") == "1":
         logger.info("Ouroboros running in headless server mode on http://127.0.0.1:8080")

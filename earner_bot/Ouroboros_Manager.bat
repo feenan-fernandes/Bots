@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
-title Ouroboros Institutional Trading Terminal
+title Ouroboros Institutional Trading Platform Manager
 color 0B
 
 :menu
@@ -10,22 +10,22 @@ echo ==================================================
 echo         OUROBOROS INSTITUTIONAL MANAGER v3.2       
 echo ==================================================
 echo.
-echo    1. Launch Control Center (Genuine GUI App)
-echo    2. Start Full Institutional Stack (Bot + Dead-Man)
-echo    3. Start Trading Bot Only (Desktop GUI)
+echo    1. Launch Trading Platform (Bento Grid 2.0 GUI)
+echo    2. Launch Institutional Control Center
+echo    3. Start Full Institutional Stack (Bot + Dead-Man)
 echo    4. Start Dead-Man's Switch Supervisor Only
 echo    5. Open Obsidian Neural Memory Vault
 echo    6. Stop All Bot ^& Supervisor Processes
 echo    7. View Trade ^& Error Logs
-echo    8. Run Integration Verification Test
+echo    8. Run Integration Verification Test ^& Backtest
 echo    9. Exit
 echo.
 echo ==================================================
 set /p choice="Select an option (1-9): "
 
-if "%choice%"=="1" goto start_gui
-if "%choice%"=="2" goto start_all
-if "%choice%"=="3" goto start_bot
+if "%choice%"=="1" goto start_bot
+if "%choice%"=="2" goto start_gui
+if "%choice%"=="3" goto start_all
 if "%choice%"=="4" goto start_dms
 if "%choice%"=="5" goto open_obsidian
 if "%choice%"=="6" goto stop
@@ -33,9 +33,18 @@ if "%choice%"=="7" goto logs
 if "%choice%"=="8" goto test_verify
 if "%choice%"=="9" goto exit
 
+:start_bot
+echo Launching Ouroboros Trading Platform...
+call "%~dp0Launch_Trading_Platform.bat"
+goto menu
+
 :start_gui
-echo Launching Ouroboros GUI Control Center...
-start "" pythonw control_center.py
+echo Launching Ouroboros Control Center...
+if exist "%~dp0dist\Ouroboros_Control_Center\Ouroboros_Control_Center.exe" (
+    start "" "%~dp0dist\Ouroboros_Control_Center\Ouroboros_Control_Center.exe"
+) else (
+    start "" pythonw control_center.py
+)
 goto menu
 
 :start_all
@@ -46,12 +55,6 @@ timeout /t 2 >nul
 start "Ouroboros Dead-Man's Switch" cmd /k "cd /d "%~dp0" && python dead_mans_switch.py"
 echo Full institutional stack started!
 timeout /t 3
-goto menu
-
-:start_bot
-echo Starting Ouroboros Trading Bot GUI...
-if not exist "%~dp0output" mkdir "%~dp0output"
-start "Ouroboros Trading Bot" cmd /k "cd /d "%~dp0" && python app.py"
 goto menu
 
 :start_dms

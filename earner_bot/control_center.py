@@ -37,6 +37,24 @@ BOT_STATE_PATH = os.path.join(BASE_DIR, "output", "bot_state.json")
 OBSIDIAN_VAULT_PATH = os.path.join(BASE_DIR, "Obsidian_Vault")
 LOGS_DIR = os.path.join(BASE_DIR, "logs")
 
+# Resolve real Python executable to prevent PyInstaller self-recursion
+def get_python_exe() -> str:
+    """Finds the real Python executable, avoiding self-recursing if compiled by PyInstaller."""
+    if getattr(sys, "frozen", False):
+        import shutil
+        py = shutil.which("python") or shutil.which("python3")
+        if py:
+            return py
+        candidates = [
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python311", "python.exe"),
+            os.path.join(os.environ.get("PROGRAMFILES", "C:\\Program Files"), "Python311", "python.exe"),
+            "C:\\Python311\\python.exe"
+        ]
+        for c in candidates:
+            if os.path.isfile(c):
+                return c
+    return sys.executable
+
 # Locate Obsidian executable dynamically
 def find_obsidian_exe() -> Optional[str]:
     local_app_data = os.environ.get("LOCALAPPDATA", "")
@@ -528,7 +546,7 @@ class OuroborosControlCenter(QMainWindow):
             self.log_message("⚠️ Trading Bot is already running.", "#F59E0B")
             return
 
-        cmd = [sys.executable, os.path.join(BASE_DIR, "app.py")]
+        cmd = [get_python_exe(), os.path.join(BASE_DIR, "app.py")]
         try:
             self.log_message(f"🚀 Spawning Trading Bot: {' '.join(cmd)}", "#10B981")
             # Spawn in visible window or separate process
@@ -547,7 +565,7 @@ class OuroborosControlCenter(QMainWindow):
             self.log_message("⚠️ Dead-Man's Switch is already running.", "#F59E0B")
             return
 
-        cmd = [sys.executable, os.path.join(BASE_DIR, "dead_mans_switch.py")]
+        cmd = [get_python_exe(), os.path.join(BASE_DIR, "dead_mans_switch.py")]
         try:
             self.log_message(f"🛡️ Spawning Dead-Man's Switch Supervisor: {' '.join(cmd)}", "#38BDF8")
             self.dms_process = subprocess.Popen(
@@ -639,7 +657,7 @@ class OuroborosControlCenter(QMainWindow):
         self.log_message("🧪 STARTING INSTITUTIONAL QUANT VERIFICATION SUITE...", "#38BDF8")
         self.log_message("🧪 ====================================================", "#38BDF8")
 
-        cmd = [sys.executable, "-u", os.path.join(BASE_DIR, "test_institutional_architecture.py")]
+        cmd = [get_python_exe(), "-u", os.path.join(BASE_DIR, "test_institutional_architecture.py")]
         self.worker = SubprocessWorker(cmd, cwd=BASE_DIR)
         self.worker.output_signal.connect(self._handle_diagnostic_output)
         self.worker.finished_signal.connect(self._diagnostic_suite_1_finished)
@@ -665,7 +683,7 @@ class OuroborosControlCenter(QMainWindow):
     def _diagnostic_suite_1_finished(self, exit_code: int):
         self.log_message(f"Suite 1 completed with code: {exit_code}", "#38BDF8")
         # Run Suite 2 (Self Learning Vault)
-        cmd2 = [sys.executable, "-u", os.path.join(BASE_DIR, "test_self_learning_vault.py")]
+        cmd2 = [get_python_exe(), "-u", os.path.join(BASE_DIR, "test_self_learning_vault.py")]
         self.worker = SubprocessWorker(cmd2, cwd=BASE_DIR)
         self.worker.output_signal.connect(self._handle_diagnostic_output)
         self.worker.finished_signal.connect(self._diagnostic_suite_2_finished)
@@ -675,7 +693,7 @@ class OuroborosControlCenter(QMainWindow):
     def _diagnostic_suite_2_finished(self, exit_code: int):
         self.log_message(f"Suite 2 completed with code: {exit_code}", "#38BDF8")
         self.log_message("📊 RUNNING AETHERIS MONTE CARLO BACKTEST & PERFORMANCE AUDIT...", "#38BDF8")
-        cmd3 = [sys.executable, "-u", os.path.join(BASE_DIR, "backtest_aetheris.py")]
+        cmd3 = [get_python_exe(), "-u", os.path.join(BASE_DIR, "backtest_aetheris.py")]
         self.worker = SubprocessWorker(cmd3, cwd=BASE_DIR)
         self.worker.output_signal.connect(self._handle_diagnostic_output)
         self.worker.finished_signal.connect(self._diagnostic_suite_3_finished)
@@ -690,7 +708,6 @@ class OuroborosControlCenter(QMainWindow):
     def open_log_file(self, filename: str):
         filepath = os.path.join(LOGS_DIR, filename)
         if not os.path.exists(filepath):
-            # Check output dir fallback
             filepath = os.path.join(BASE_DIR, "output", filename)
         
         if not os.path.exists(filepath):
@@ -717,7 +734,6 @@ class OuroborosControlCenter(QMainWindow):
             self.log_message(f"❌ Failed to open directory: {e}", "#EF4444")
 
     def closeEvent(self, event):
-        # Graceful exit without killing background bot unless user confirms
         if self.bot_process is not None or self.dms_process is not None:
             reply = QMessageBox.question(
                 self,
@@ -738,6 +754,8 @@ class OuroborosControlCenter(QMainWindow):
 
 
 def main():
+    import multiprocessing
+    multiprocessing.freeze_support()
     app = QApplication(sys.argv)
     app.setApplicationName("Ouroboros Control Center")
     window = OuroborosControlCenter()
