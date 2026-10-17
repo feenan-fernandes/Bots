@@ -1067,8 +1067,15 @@ if __name__ == "__main__":
         
     t = threading.Thread(target=start_server)
     t.daemon = True
-    t.start()
-    
-    # Launch pywebview window
-    webview.create_window("Ouroboros Algo Trading", "http://127.0.0.1:8080")
-    webview.start(private_mode=False)
+    import sys
+    if "--headless" in sys.argv or os.environ.get("OUROBOROS_HEADLESS") == "1":
+        logger.info("Ouroboros running in headless server mode on http://127.0.0.1:8080")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("Ouroboros server shutting down...")
+    else:
+        # Launch pywebview window
+        webview.create_window("Ouroboros Algo Trading", "http://127.0.0.1:8080")
+        webview.start(private_mode=False)

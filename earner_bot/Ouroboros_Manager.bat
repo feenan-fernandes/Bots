@@ -1,57 +1,71 @@
 @echo off
+setlocal EnableDelayedExpansion
+cd /d "%~dp0"
 title Ouroboros Institutional Trading Terminal
 color 0B
+
 :menu
 cls
 echo ==================================================
 echo         OUROBOROS INSTITUTIONAL MANAGER v3.2       
 echo ==================================================
 echo.
-echo    1. Start Full Institutional Stack (Bot + Dead-Man's Switch)
-echo    2. Start Trading Bot Only (Desktop GUI)
-echo    3. Start Dead-Man's Switch Supervisor Only
-echo    4. Open Obsidian Neural Memory Vault
-echo    5. Stop All Bot & Supervisor Processes
-echo    6. View Trade & Error Logs
-echo    7. Run Integration Verification Test
-echo    8. Exit
+echo    1. Launch Control Center (Genuine GUI App)
+echo    2. Start Full Institutional Stack (Bot + Dead-Man)
+echo    3. Start Trading Bot Only (Desktop GUI)
+echo    4. Start Dead-Man's Switch Supervisor Only
+echo    5. Open Obsidian Neural Memory Vault
+echo    6. Stop All Bot ^& Supervisor Processes
+echo    7. View Trade ^& Error Logs
+echo    8. Run Integration Verification Test
+echo    9. Exit
 echo.
 echo ==================================================
-set /p choice="Select an option (1-8): "
+set /p choice="Select an option (1-9): "
 
-if "%choice%"=="1" goto start_all
-if "%choice%"=="2" goto start_bot
-if "%choice%"=="3" goto start_dms
-if "%choice%"=="4" goto open_obsidian
-if "%choice%"=="5" goto stop
-if "%choice%"=="6" goto logs
-if "%choice%"=="7" goto test_verify
-if "%choice%"=="8" goto exit
+if "%choice%"=="1" goto start_gui
+if "%choice%"=="2" goto start_all
+if "%choice%"=="3" goto start_bot
+if "%choice%"=="4" goto start_dms
+if "%choice%"=="5" goto open_obsidian
+if "%choice%"=="6" goto stop
+if "%choice%"=="7" goto logs
+if "%choice%"=="8" goto test_verify
+if "%choice%"=="9" goto exit
+
+:start_gui
+echo Launching Ouroboros GUI Control Center...
+start "" pythonw control_center.py
+goto menu
 
 :start_all
 echo Starting Ouroboros Trading Bot and Dead-Man's Switch...
-if not exist output mkdir output
-start "Ouroboros Trading Bot" cmd /k "python app.py"
+if not exist "%~dp0output" mkdir "%~dp0output"
+start "Ouroboros Trading Bot" cmd /k "cd /d "%~dp0" && python app.py"
 timeout /t 2 >nul
-start "Ouroboros Dead-Man's Switch" cmd /k "python dead_mans_switch.py"
+start "Ouroboros Dead-Man's Switch" cmd /k "cd /d "%~dp0" && python dead_mans_switch.py"
 echo Full institutional stack started!
 timeout /t 3
 goto menu
 
 :start_bot
 echo Starting Ouroboros Trading Bot GUI...
-if not exist output mkdir output
-start "Ouroboros Trading Bot" cmd /k "python app.py"
+if not exist "%~dp0output" mkdir "%~dp0output"
+start "Ouroboros Trading Bot" cmd /k "cd /d "%~dp0" && python app.py"
 goto menu
 
 :start_dms
 echo Starting Ouroboros Dead-Man's Switch Supervisor...
-start "Ouroboros Dead-Man's Switch" cmd /k "python dead_mans_switch.py"
+start "Ouroboros Dead-Man's Switch" cmd /k "cd /d "%~dp0" && python dead_mans_switch.py"
 goto menu
 
 :open_obsidian
 echo Opening Obsidian Neural Memory Vault...
-start "" "obsidian://open?path=%CD%\Obsidian_Vault"
+if exist "%LOCALAPPDATA%\Programs\Obsidian\Obsidian.exe" (
+    start "" "%LOCALAPPDATA%\Programs\Obsidian\Obsidian.exe"
+) else (
+    start "" "obsidian://open?path=%~dp0Obsidian_Vault"
+)
 goto menu
 
 :stop
@@ -64,13 +78,14 @@ goto menu
 
 :logs
 echo Opening log files...
-if exist logs\Ouroboros_trades.log start notepad logs\Ouroboros_trades.log
-if exist logs\Ouroboros_errors.log start notepad logs\Ouroboros_errors.log
-if exist output\run.log start notepad output\run.log
+if exist "%~dp0logs\Ouroboros_trades.log" start notepad "%~dp0logs\Ouroboros_trades.log"
+if exist "%~dp0logs\Ouroboros_errors.log" start notepad "%~dp0logs\Ouroboros_errors.log"
+if exist "%~dp0output\run.log" start notepad "%~dp0output\run.log"
 goto menu
 
 :test_verify
 echo Running Full Institutional Test Suite...
+cd /d "%~dp0"
 python test_institutional_architecture.py
 python test_self_learning_vault.py
 echo.
