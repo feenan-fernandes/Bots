@@ -1,22 +1,57 @@
-# Secrets
+# ==============================================================================
+# SECRETS & ENVIRONMENT VARIABLES (CRITICAL CYBERSECURITY PROTECTION)
+# ==============================================================================
 .env
+.env.*
+*.env
+*.key
+*.pem
+*.cert
+*.crt
+*.pfx
+*.p12
+secrets/
+credentials/
+config.json
+bot_state.json
 
-# Virtual environment
-venv/
-
-# Output data
+# ==============================================================================
+# LOGS & RUNTIME DATA
+# ==============================================================================
+logs/
+*.log
+*.log.*
 output/
+data/
 
-# Python cache
+# ==============================================================================
+# BACKUPS & TEMPORARY FILES
+# ==============================================================================
+*.bak
+*.tmp
+*.swp
+*~
+
+# ==============================================================================
+# PYTHON BYTECODE & VIRTUAL ENVIRONMENTS
+# ==============================================================================
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+build/
+dist/
+*.spec
+.Python
 
-# IDE
+# ==============================================================================
+# IDE & OPERATING SYSTEM ARTIFACTS
+# ==============================================================================
 .vscode/
 .idea/
-
-# PyInstaller
-dist/
-build/
-*.spec
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db
