@@ -86,7 +86,8 @@ loginForm.addEventListener('submit', async (e) => {
             fetchStatus();
             fetchChartData();
         } else {
-            showToast('Invalid passphrase.');
+            const errData = await res.json().catch(() => ({}));
+            showToast(errData.error || 'Invalid passphrase.');
         }
     } catch (err) {
         showToast('Login error.');

@@ -25,6 +25,10 @@ logging.basicConfig(level=logging.INFO,
 
 from flask import Flask, jsonify, request, send_from_directory, session, abort
 import os
+import hmac
+import secrets
+import re
+import collections
 import dotenv
 import webview
 from functools import wraps
@@ -76,16 +80,36 @@ from loggers import trade_logger
 logger = logging.getLogger("Ouroboros.app")
 
 app = Flask(__name__, static_folder='static')
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "Ouroboros_bot_static_secret_key_99123")
+# Dynamic cryptographically secure fallback prevents forged sessions if .env is missing (CWE-798 / OWASP API2)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 
-# Ensure cookies are secure
+# Ensure cookies are secure and bounded to 24 hours (CWE-613)
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Strict',
-    PERMANENT_SESSION_LIFETIME=timedelta(days=365)
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=24)
 )
 
 csrf = CSRFProtect(app)
+
+@app.after_request
+def add_security_headers(response):
+    """Defense-in-depth security headers (OWASP API8:2023)."""
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none';"
+    )
+    return response
 
 @app.errorhandler(CSRFError)
 def handle_csrf_error(e):
@@ -97,6 +121,8 @@ def handle_401_error(e):
 
 # Fallback passphrase if not set in .env
 ADMIN_PASSPHRASE = os.environ.get("ADMIN_PASSPHRASE", "Ouroboros")
+if ADMIN_PASSPHRASE == "Ouroboros":
+    logger.warning("SECURITY WARNING: Using default ADMIN_PASSPHRASE. Set ADMIN_PASSPHRASE in .env.")
 
 def login_required(f):
     @wraps(f)
@@ -123,15 +149,18 @@ def _save_state() -> None:
 #  HTTP ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════
 
-@app.route("/health")
-def health():
-    """Health check with portfolio status in AED."""
-    port_aed = 0.0
-    symbol = state_mgr.last_analysis.get("symbol", "BTCUSDT")
+# ─── Portfolio Balance Cache (prevents Binance REST API rate limit exhaustion) ───
+_portfolio_cache = {"ts": 0.0, "aed": 0.0}
+_cache_lock = threading.Lock()
+
+def _get_cached_portfolio_aed() -> float:
+    now = time.time()
+    with _cache_lock:
+        if now - _portfolio_cache["ts"] < 15.0 and _portfolio_cache["ts"] > 0:
+            return _portfolio_cache["aed"]
     try:
         balances = get_balances()
         if balances:
-            # Build prices dict for all held assets
             prices = {}
             for asset in balances:
                 if asset != 'USDT':
@@ -140,28 +169,95 @@ def health():
                         prices[f"{asset}USDT"] = p
             port_usd = portfolio_value_usd(balances, prices)
             port_aed = port_usd * config.AED_USD_RATE
+            with _cache_lock:
+                _portfolio_cache["ts"] = now
+                _portfolio_cache["aed"] = port_aed
+            return port_aed
     except Exception as e:
-        logger.error(f"Error in health check: {e}")
+        logger.error(f"Error computing portfolio balance: {e}")
+    with _cache_lock:
+        return _portfolio_cache["aed"]
 
-    return jsonify({
+
+@app.route("/health")
+def health():
+    """
+    Health check with cached metrics.
+    Protects Binance API quota from exhaustion (OWASP API4) and prevents unauthenticated data leakage (OWASP API1).
+    """
+    symbol = state_mgr.last_analysis.get("symbol", "BTCUSDT")
+    is_authed = bool(session.get("logged_in"))
+
+    payload = {
         "status":       "halted" if is_halted() else "ok",
         "paper_mode":   config.PAPER_MODE,
-        "symbol":       symbol,
-        "has_position":  len(state_mgr.open_trades) > 0,
-        "portfolio_aed": round(port_aed, 2),
+        "has_position": len(state_mgr.open_trades) > 0,
         "ts":           datetime.now(timezone.utc).isoformat(),
-    })
+    }
+    if is_authed:
+        port_aed = _get_cached_portfolio_aed()
+        payload["symbol"] = symbol
+        payload["portfolio_aed"] = round(port_aed, 2)
+
+    return jsonify(payload)
+
+
+# ─── Security: Rate Limiting & Lockout Registry (OWASP API2 & API4) ───
+_login_attempts = collections.defaultdict(list)
+_login_lockouts = {}
+_login_lock = threading.Lock()
+MAX_LOGIN_ATTEMPTS = 5
+LOGIN_WINDOW_SECONDS = 60
+LOCKOUT_DURATION_SECONDS = 300  # 5-minute lockout on repeated failures
 
 
 @app.route("/api/login", methods=["POST"])
 def login():
-    """Authenticate via passphrase."""
-    data = request.get_json()
-    if data and data.get("passphrase") == ADMIN_PASSPHRASE:
-        session["logged_in"] = True
-        session.permanent = True
-        return jsonify({"status": "success"})
-    return jsonify({"error": "Invalid passphrase"}), 401
+    """Authenticate via passphrase with constant-time check & rate-limiting."""
+    client_ip = request.remote_addr or "127.0.0.1"
+    now = time.time()
+
+    with _login_lock:
+        lockout_expiry = _login_lockouts.get(client_ip, 0)
+        if now < lockout_expiry:
+            remaining = int(lockout_expiry - now)
+            return jsonify({
+                "error": f"Too many failed login attempts. Locked out for {remaining} seconds."
+            }), 429
+
+        _login_attempts[client_ip] = [
+            t for t in _login_attempts[client_ip]
+            if now - t < LOGIN_WINDOW_SECONDS
+        ]
+
+    data = request.get_json() or {}
+    submitted = str(data.get("passphrase", ""))
+
+    # Constant-time comparison to prevent timing side-channel attacks (CWE-208 / OWASP API2)
+    is_valid = hmac.compare_digest(submitted, ADMIN_PASSPHRASE)
+
+    with _login_lock:
+        if is_valid:
+            _login_attempts.pop(client_ip, None)
+            _login_lockouts.pop(client_ip, None)
+            session["logged_in"] = True
+            session.permanent = True
+            return jsonify({"status": "success"})
+        else:
+            _login_attempts[client_ip].append(now)
+            attempts_count = len(_login_attempts[client_ip])
+            if attempts_count >= MAX_LOGIN_ATTEMPTS:
+                _login_lockouts[client_ip] = now + LOCKOUT_DURATION_SECONDS
+                logger.warning(f"Security Alert: Excessive failed logins from {client_ip}. Enforcing 5m lockout.")
+                return jsonify({
+                    "error": f"Too many failed attempts. Account locked for {LOCKOUT_DURATION_SECONDS} seconds."
+                }), 429
+
+            remaining_attempts = MAX_LOGIN_ATTEMPTS - attempts_count
+            return jsonify({
+                "error": "Invalid passphrase",
+                "remaining_attempts": remaining_attempts
+            }), 401
 
 
 @app.route("/api/logout", methods=["POST"])
@@ -385,63 +481,84 @@ def get_config():
 @app.route("/api/config", methods=["POST"])
 @login_required
 def update_config():
-    """Update API keys in .env securely."""
+    """Update API keys in .env securely with strict sanitization (OWASP API3 & API8)."""
     data = request.get_json()
+    if not data or not isinstance(data, dict):
+        return jsonify({"status": "error", "message": "Invalid payload format"}), 400
+
     env_file = dotenv.find_dotenv()
-    
     if not env_file:
-        # Create .env if it doesn't exist
         env_file = os.path.join(os.getcwd(), ".env")
         with open(env_file, 'w') as f:
             f.write("PAPER_MODE=true\nSYMBOL=BTCUSDT\n")
 
+    def _sanitize_val(val: Any, max_len: int = 128) -> str:
+        if not isinstance(val, str):
+            return ""
+        # Strip newlines and carriage returns to prevent .env injection
+        cleaned = val.strip().replace("\r", "").replace("\n", "")
+        return cleaned[:max_len]
+
     if data.get("binance_api_key"):
-        dotenv.set_key(env_file, "BINANCE_API_KEY", data["binance_api_key"])
-        os.environ["BINANCE_API_KEY"] = data["binance_api_key"]
-        config.BINANCE_API_KEY = data["binance_api_key"]
+        clean_key = _sanitize_val(data["binance_api_key"])
+        dotenv.set_key(env_file, "BINANCE_API_KEY", clean_key)
+        os.environ["BINANCE_API_KEY"] = clean_key
+        config.BINANCE_API_KEY = clean_key
     
     if data.get("binance_secret"):
-        dotenv.set_key(env_file, "BINANCE_SECRET", data["binance_secret"])
-        os.environ["BINANCE_SECRET"] = data["binance_secret"]
-        config.BINANCE_SECRET = data["binance_secret"]
+        clean_sec = _sanitize_val(data["binance_secret"])
+        dotenv.set_key(env_file, "BINANCE_SECRET", clean_sec)
+        os.environ["BINANCE_SECRET"] = clean_sec
+        config.BINANCE_SECRET = clean_sec
 
     if data.get("telegram_token"):
-        dotenv.set_key(env_file, "TELEGRAM_BOT_TOKEN", data["telegram_token"])
-        os.environ["TELEGRAM_BOT_TOKEN"] = data["telegram_token"]
-        config.TELEGRAM_BOT_TOKEN = data["telegram_token"]
+        clean_token = _sanitize_val(data["telegram_token"])
+        dotenv.set_key(env_file, "TELEGRAM_BOT_TOKEN", clean_token)
+        os.environ["TELEGRAM_BOT_TOKEN"] = clean_token
+        config.TELEGRAM_BOT_TOKEN = clean_token
 
     if data.get("telegram_chat_id"):
-        dotenv.set_key(env_file, "TELEGRAM_CHAT_ID", data["telegram_chat_id"])
-        os.environ["TELEGRAM_CHAT_ID"] = data["telegram_chat_id"]
-        config.TELEGRAM_CHAT_ID = data["telegram_chat_id"]
+        clean_chat = _sanitize_val(data["telegram_chat_id"], max_len=64)
+        dotenv.set_key(env_file, "TELEGRAM_CHAT_ID", clean_chat)
+        os.environ["TELEGRAM_CHAT_ID"] = clean_chat
+        config.TELEGRAM_CHAT_ID = clean_chat
 
     if "paper_mode" in data:
         mode_str = "true" if data["paper_mode"] else "false"
         dotenv.set_key(env_file, "PAPER_MODE", mode_str)
         os.environ["PAPER_MODE"] = mode_str
-        config.PAPER_MODE = data["paper_mode"]
+        config.PAPER_MODE = bool(data["paper_mode"])
 
     if "futures_mode" in data:
         fmode_str = "true" if data["futures_mode"] else "false"
         dotenv.set_key(env_file, "FUTURES_MODE", fmode_str)
         os.environ["FUTURES_MODE"] = fmode_str
-        config.FUTURES_MODE = data["futures_mode"]
+        config.FUTURES_MODE = bool(data["futures_mode"])
 
     init_client()
 
-    return jsonify({"status": "success", "message": "Configuration saved."})
+    return jsonify({"status": "success", "message": "Configuration saved securely."})
 
+
+VALID_INTERVALS = {"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"}
+SYMBOL_REGEX = re.compile(r"^[A-Z0-9]{3,15}$")
 
 @app.route("/api/chart", methods=["GET"])
 @login_required
 def get_chart_data():
-    """Returns the last 150 candles with MA25 for the UI chart."""
+    """Returns the last 150 candles with MA25 for the UI chart with input validation."""
     try:
         symbol = request.args.get("symbol")
-        if not symbol:
+        if symbol:
+            symbol = symbol.strip().upper()
+            if not SYMBOL_REGEX.match(symbol):
+                return jsonify({"status": "error", "message": "Invalid symbol format"}), 400
+        else:
             symbol = state_mgr.last_analysis.get("symbol", "BTCUSDT")
         
         interval = request.args.get("interval", config.INTERVAL_PRIMARY)
+        if interval not in VALID_INTERVALS:
+            return jsonify({"status": "error", "message": "Invalid interval specified"}), 400
         
         raw_df = get_data(broker_binance.client, symbol, interval, 350)
         df = add_indicators(raw_df)
@@ -461,8 +578,8 @@ def get_chart_data():
         # Limit to the last 100 candles for a zoomed-in look
         return jsonify({"status": "success", "data": chart_data[-100:]})
     except Exception as e:
-        logger.error("Chart error: %s", e, exc_info=True)
-        return jsonify({"status": "error", "message": str(e)}), 500
+        logger.error("Chart retrieval error: %s", e, exc_info=True)
+        return jsonify({"status": "error", "message": "Internal error retrieving chart data"}), 500
 
 
 @app.route("/")
@@ -505,14 +622,29 @@ def background_scan():
     except Exception as e:
         logger.error(f"Background scan error: {e}")
 
+_scan_lock = threading.Lock()
+
 @app.route('/api/run_cycle', methods=['POST'])
 @login_required
 def run_cycle():
     """
     Forces a manual background evaluation of top symbols.
+    Guarded by atomic concurrency lock to prevent thread/API exhaustion (OWASP API4).
     """
+    if not _scan_lock.acquire(blocking=False):
+        return jsonify({
+            "status": "error",
+            "message": "Scan already in progress. Please wait for current cycle to complete."
+        }), 429
+
+    def _run_with_lock():
+        try:
+            background_scan()
+        finally:
+            _scan_lock.release()
+
     from threading import Thread
-    Thread(target=background_scan, daemon=True).start()
+    Thread(target=_run_with_lock, daemon=True).start()
     return jsonify({"action": "BACKGROUND_SCAN_STARTED", "message": "Evaluating in background..."})
 
 def _scanner_loop():
@@ -1051,8 +1183,8 @@ def get_analytics():
             }
         })
     except Exception as e:
-        logger.error(f"Analytics error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        logger.error(f"Analytics error: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": "Internal error computing analytics"}), 500
 
 if __name__ == "__main__":
     ws_engine.start()
