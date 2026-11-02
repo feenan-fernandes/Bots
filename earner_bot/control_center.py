@@ -741,8 +741,15 @@ class OuroborosControlCenter(QMainWindow):
             filepath = os.path.join(BASE_DIR, "output", filename)
         
         if not os.path.exists(filepath):
-            self.log_message(f"⚠️ Log file not found: {filename}", "#F59E0B")
-            return
+            target_path = os.path.join(LOGS_DIR, filename)
+            try:
+                os.makedirs(LOGS_DIR, exist_ok=True)
+                with open(target_path, "a", encoding="utf-8") as f:
+                    f.write(f"--- Ouroboros Log Initialized: {datetime.now()} ---\n")
+                filepath = target_path
+            except Exception:
+                self.log_message(f"⚠️ Log file not found: {filename}", "#F59E0B")
+                return
 
         self.log_message(f"📜 Opening {filename} in default text editor...", "#E2E8F0")
         try:
