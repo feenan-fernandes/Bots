@@ -28,7 +28,25 @@ from PySide6.QtCore import Qt, QTimer, QThread, Signal, Slot
 from PySide6.QtGui import QFont, QIcon, QColor, QTextCursor
 
 # Ensure deterministic absolute working directory
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# When running from PyInstaller .exe, __file__ resolves to _internal/ which lacks project files.
+# We need the actual project root (where app.py, .env, strategy.py etc. live).
+if getattr(sys, "frozen", False):
+    # Frozen .exe: Ouroboros_Control_Center.exe lives in dist/Ouroboros_Control_Center/
+    # The project root is 3 levels up: dist/Ouroboros_Control_Center/_internal -> ../../..
+    # But we resolve it from the .exe location (sys.executable) rather than __file__
+    _exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    # Walk upward from the .exe directory to find the actual project root containing app.py
+    _candidate = _exe_dir
+    for _up in range(5):  # max 5 levels up
+        if os.path.isfile(os.path.join(_candidate, "app.py")):
+            break
+        _candidate = os.path.dirname(_candidate)
+    else:
+        # Fallback: assume earner_bot is a known fixed location
+        _candidate = r"c:\Users\feena\OneDrive\Documents\Agentic\earner_bot"
+    BASE_DIR = _candidate
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
 # Heartbeat & state file paths
@@ -546,7 +564,14 @@ class OuroborosControlCenter(QMainWindow):
             self.log_message("⚠️ Trading Bot is already running.", "#F59E0B")
             return
 
-        cmd = [get_python_exe(), os.path.join(BASE_DIR, "app.py")]
+        app_path = os.path.join(BASE_DIR, "app.py")
+        if not os.path.isfile(app_path):
+            self.log_message(f"❌ Cannot find app.py at: {app_path}", "#EF4444")
+            self.log_message(f"   BASE_DIR resolved to: {BASE_DIR}", "#F59E0B")
+            self.log_message("   Please run the bot from the project root or update your .exe build.", "#F59E0B")
+            return
+
+        cmd = [get_python_exe(), app_path]
         try:
             self.log_message(f"🚀 Spawning Trading Bot: {' '.join(cmd)}", "#10B981")
             # Spawn in visible window or separate process
@@ -565,7 +590,12 @@ class OuroborosControlCenter(QMainWindow):
             self.log_message("⚠️ Dead-Man's Switch is already running.", "#F59E0B")
             return
 
-        cmd = [get_python_exe(), os.path.join(BASE_DIR, "dead_mans_switch.py")]
+        dms_path = os.path.join(BASE_DIR, "dead_mans_switch.py")
+        if not os.path.isfile(dms_path):
+            self.log_message(f"❌ Cannot find dead_mans_switch.py at: {dms_path}", "#EF4444")
+            return
+
+        cmd = [get_python_exe(), dms_path]
         try:
             self.log_message(f"🛡️ Spawning Dead-Man's Switch Supervisor: {' '.join(cmd)}", "#38BDF8")
             self.dms_process = subprocess.Popen(
