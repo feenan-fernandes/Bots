@@ -346,109 +346,129 @@ class OuroborosControlCenter(QMainWindow):
     def _apply_dark_theme(self):
         self.setStyleSheet("""
             QMainWindow {
-                background-color: #0B0F19;
+                background-color: #030712;
             }
             #headerCard {
-                background-color: #111827;
-                border: 1px solid #1F2937;
-                border-radius: 8px;
+                background-color: #0B1324;
+                border: 1px solid #1E293B;
+                border-radius: 10px;
             }
             #appTitle {
                 color: #38BDF8;
                 font-size: 18px;
                 font-weight: 800;
-                letter-spacing: 1px;
+                letter-spacing: 0.8px;
             }
             #appSubtitle {
                 color: #94A3B8;
                 font-size: 11px;
+                font-weight: 500;
             }
             #clockLabel {
                 color: #64748B;
-                font-family: Consolas, monospace;
-                font-size: 13px;
-                font-weight: bold;
+                font-family: 'JetBrains Mono', Consolas, monospace;
+                font-size: 12px;
+                font-weight: 600;
             }
             #telemetryCard {
-                background-color: #111827;
-                border: 1px solid #1F2937;
-                border-radius: 8px;
+                background-color: #0B1324;
+                border: 1px solid #1E293B;
+                border-radius: 10px;
+            }
+            #telemetryCard:hover {
+                border-color: #334155;
             }
             #cardTitle {
                 color: #64748B;
                 font-size: 10px;
-                font-weight: bold;
-                letter-spacing: 0.5px;
+                font-weight: 700;
+                letter-spacing: 0.6px;
             }
             #cardValue {
                 font-size: 13px;
-                font-family: 'Segoe UI', sans-serif;
+                font-family: 'JetBrains Mono', 'Segoe UI', sans-serif;
+                font-weight: 700;
             }
             QPushButton {
                 font-family: 'Segoe UI', sans-serif;
                 font-size: 12px;
-                font-weight: bold;
+                font-weight: 700;
                 padding: 10px 14px;
-                border-radius: 6px;
-                border: none;
+                border-radius: 7px;
+                border: 1px solid transparent;
             }
             #btnPrimary {
                 background-color: #10B981;
                 color: #FFFFFF;
+                border: 1px solid rgba(16, 185, 129, 0.4);
             }
             #btnPrimary:hover {
                 background-color: #059669;
+                border-color: #10B981;
             }
             #btnPrimary:pressed {
                 background-color: #047857;
             }
             #btnDanger {
-                background-color: #EF4444;
+                background-color: #F43F5E;
                 color: #FFFFFF;
+                border: 1px solid rgba(244, 63, 94, 0.4);
             }
             #btnDanger:hover {
-                background-color: #DC2626;
+                background-color: #E11D48;
+                border-color: #F43F5E;
             }
             #btnDanger:pressed {
-                background-color: #B91C1C;
+                background-color: #BE123C;
             }
             #btnSecondary {
-                background-color: #1E293B;
+                background-color: #131E33;
                 color: #E2E8F0;
-                border: 1px solid #334155;
+                border: 1px solid #223354;
             }
             #btnSecondary:hover {
-                background-color: #334155;
+                background-color: #1E2D4A;
+                border-color: #38BDF8;
                 color: #FFFFFF;
+            }
+            #btnSecondary:pressed {
+                background-color: #0E1726;
             }
             #btnAccent {
-                background-color: #1E3A8A;
-                color: #93C5FD;
-                border: 1px solid #1D4ED8;
+                background-color: #075985;
+                color: #E0F2FE;
+                border: 1px solid #0284C7;
             }
             #btnAccent:hover {
-                background-color: #2563EB;
+                background-color: #0284C7;
                 color: #FFFFFF;
             }
+            #btnAccent:pressed {
+                background-color: #0369A1;
+            }
             #btnUtility {
-                background-color: #0F172A;
+                background-color: #0A0F1D;
                 color: #94A3B8;
                 border: 1px solid #1E293B;
             }
             #btnUtility:hover {
-                background-color: #1E293B;
+                background-color: #131E33;
                 color: #E2E8F0;
+                border-color: #334155;
+            }
+            #btnUtility:pressed {
+                background-color: #080D1A;
             }
             #consoleFrame {
-                background-color: #030712;
-                border: 1px solid #1F2937;
-                border-radius: 8px;
+                background-color: #020617;
+                border: 1px solid #1E293B;
+                border-radius: 10px;
             }
             #consoleTitle {
                 color: #64748B;
                 font-size: 11px;
-                font-weight: bold;
-                letter-spacing: 0.5px;
+                font-weight: 700;
+                letter-spacing: 0.6px;
             }
             #consoleCheck {
                 color: #94A3B8;
@@ -459,24 +479,25 @@ class OuroborosControlCenter(QMainWindow):
                 color: #64748B;
                 font-size: 11px;
                 padding: 3px 8px;
-                border: 1px solid #1F2937;
-                border-radius: 4px;
+                border: 1px solid #1E293B;
+                border-radius: 5px;
             }
             #btnClear:hover {
                 color: #E2E8F0;
-                background-color: #1F2937;
+                background-color: #1E293B;
             }
             #consoleText {
-                background-color: #030712;
+                background-color: #020617;
                 color: #E2E8F0;
-                font-family: Consolas, 'Courier New', monospace;
+                font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
                 font-size: 11px;
                 border: none;
             }
             QStatusBar {
-                background-color: #0B0F19;
+                background-color: #030712;
                 color: #64748B;
                 font-size: 11px;
+                font-family: 'Segoe UI', sans-serif;
             }
         """)
 

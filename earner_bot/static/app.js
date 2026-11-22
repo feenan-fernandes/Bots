@@ -814,11 +814,11 @@ function updateDashboard(status, health) {
                 ? '<tr><td colspan="5" style="text-align: center; padding: 2rem 0; color: var(--text-muted);">No candidates evaluated</td></tr>'
                 : status.top_candidates.map(c => `
                       <tr>
-                          <td style="font-weight:600;">${c.symbol.replace('USDT', '')}</td>
-                          <td>${getScoreBadge(c.score)}</td>
-                          <td>${getIndStr(c.breakdown?.dynamic_level_bounce || 0)}</td>
-                          <td>${getIndStr(c.breakdown?.pattern || 0)}</td>
-                          <td><span style="color:var(--text-muted); font-size:0.7rem;">${c.regime || '-'}</span></td>
+                          <td class="ticker">${c.symbol.replace('USDT', '')}</td>
+                          <td class="num">${getScoreBadge(c.score)}</td>
+                          <td class="num">${getIndStr(c.breakdown?.dynamic_level_bounce || 0)}</td>
+                          <td class="num">${getIndStr(c.breakdown?.pattern || 0)}</td>
+                          <td class="cen"><span style="color:var(--text-secondary); font-size:0.7rem; font-family:var(--font-heading); font-weight:600;">${c.regime || '-'}</span></td>
                       </tr>
                 `).join('');
 
