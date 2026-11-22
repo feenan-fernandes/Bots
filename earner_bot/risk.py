@@ -3,6 +3,7 @@ risk.py — Ouroboros Bot 3.1 Risk Management Engine
 Adaptive Kelly position sizing, ATR-based dynamic stops, trailing stops,
 time-based exits, AED portfolio tracking, and 3-tier capital protection.
 """
+import math
 import logging
 from datetime import datetime, timezone
 from typing import Optional, Dict, List, Tuple, Any
@@ -38,19 +39,31 @@ ROUND_TRIP_FEE = 0.002  # 0.2% round-trip exchange fee penalty
 def compute_kelly_from_history(trade_history: List[Dict]) -> Tuple[float, float, float]:
     """
     Compute win_rate, avg_win, avg_loss from actual trade results.
-    Analyzes only the last 10 trades to actively prioritize present market edge.
+    Analyzes up to the last 30 trades to adaptively track market edge.
     """
-    recent_trades = trade_history[-10:] if trade_history else []
+    recent_trades = trade_history[-30:] if trade_history else []
     
-    if len(recent_trades) < MIN_TRADES_FOR_ADAPTIVE:
+    if len(recent_trades) < 5:
         return FALLBACK_WIN_RATE, FALLBACK_AVG_WIN, FALLBACK_AVG_LOSS
 
-    wins  = [t for t in recent_trades if t.get("pnl_pct", 0) > 0]
-    losses = [t for t in recent_trades if t.get("pnl_pct", 0) <= 0]
+    wins = []
+    losses = []
+    for t in recent_trades:
+        val = t.get("pnl_pct")
+        if val is None:
+            val = t.get("pnl_usd", 0.0)
+        if val > 0:
+            wins.append(abs(val))
+        else:
+            losses.append(abs(val))
 
-    win_rate = len(wins) / len(recent_trades) if recent_trades else FALLBACK_WIN_RATE
-    avg_win  = abs(sum(t["pnl_pct"] for t in wins) / len(wins)) if wins else FALLBACK_AVG_WIN
-    avg_loss = abs(sum(t["pnl_pct"] for t in losses) / len(losses)) if losses else FALLBACK_AVG_LOSS
+    if not wins:
+        # All recent trades were losses — expected value is strictly negative!
+        return 0.0, max(0.0001, FALLBACK_AVG_WIN), max(0.001, (sum(losses)/len(losses)/100.0) if losses else FALLBACK_AVG_LOSS)
+
+    win_rate = len(wins) / len(recent_trades)
+    avg_win  = sum(wins) / len(wins)
+    avg_loss = sum(losses) / len(losses) if losses else FALLBACK_AVG_LOSS
 
     # Convert from percentage to decimal and apply rigid FEE PENALTY
     avg_win  = (avg_win / 100.0) - ROUND_TRIP_FEE
@@ -174,7 +187,11 @@ def adaptive_kelly_size(capital_balance: float, asset_price: float,
 # ═══════════════════════════════════════════════════════════════════
 
 def compute_stop_loss(entry_price: float, atr: float, regime: str, side: str = "LONG") -> float:
-    """ATR-based stop-loss with minimum distance floor to survive market noise."""
+    """ATR-based stop-loss with minimum distance floor to survive market noise and input safety guards."""
+    if entry_price <= 0 or math.isnan(entry_price):
+        raise ValueError(f"Invalid entry_price: {entry_price} must be strictly positive.")
+    
+    safe_atr = max(0.0, float(atr)) if (atr is not None and not math.isnan(float(atr))) else 0.0
     multiplier = STOP_LOSS_ATR_MULT
     if regime == "RANGING":
         multiplier *= 0.9  # Slightly tighter in ranges, but not suicidally tight
@@ -183,7 +200,7 @@ def compute_stop_loss(entry_price: float, atr: float, regime: str, side: str = "
     elif regime == "PANIC":
         multiplier *= 1.5  # Wider stops during high volatility
 
-    atr_distance = atr * multiplier
+    atr_distance = safe_atr * multiplier
     
     # Floor: SL must be at least 0.35% from entry to survive normal market noise
     min_distance = entry_price * 0.0035
@@ -192,34 +209,38 @@ def compute_stop_loss(entry_price: float, atr: float, regime: str, side: str = "
     if side == "SHORT":
         stop = entry_price + distance
     else:
-        stop = entry_price - distance
+        stop = max(0.0001, entry_price - distance)
         
     logger.info("Stop-loss computed: entry=%.2f ATR=%.2f mult=%.1f stop=%.2f side=%s dist=%.4f%%",
-                entry_price, atr, multiplier, stop, side, (distance/entry_price)*100)
+                entry_price, safe_atr, multiplier, stop, side, (distance/entry_price)*100)
     return stop
 
 
 def compute_take_profit(entry_price: float, atr: float, regime: str, side: str = "LONG") -> float:
-    """ATR-based take-profit with minimum distance floor to ensure fee viability."""
+    """ATR-based take-profit with minimum distance floor to ensure fee viability and input safety guards."""
+    if entry_price <= 0 or math.isnan(entry_price):
+        raise ValueError(f"Invalid entry_price: {entry_price} must be strictly positive.")
+
+    safe_atr = max(0.0, float(atr)) if (atr is not None and not math.isnan(float(atr))) else 0.0
     multiplier = TAKE_PROFIT_ATR_MULT
     if regime == "TRENDING":
         multiplier *= 1.3  # Let profits run in trends
     elif regime == "RANGING":
         multiplier *= 0.9  # Slightly tighter in ranges
 
-    atr_distance = atr * multiplier
+    atr_distance = safe_atr * multiplier
     
     # Floor: TP must be at least 0.25% from entry to always cover fees
     min_distance = entry_price * 0.0025
     distance = max(atr_distance, min_distance)
 
     if side == "SHORT":
-        target = entry_price - distance
+        target = max(0.0001, entry_price - distance)
     else:
         target = entry_price + distance
         
     logger.info("Take-profit computed: entry=%.2f ATR=%.2f mult=%.1f target=%.2f side=%s dist=%.4f%%",
-                entry_price, atr, multiplier, target, side, (distance/entry_price)*100)
+                entry_price, safe_atr, multiplier, target, side, (distance/entry_price)*100)
     return target
 
 
@@ -231,13 +252,18 @@ def check_trailing_stop(entry_price: float, current_price: float,
 
     Returns (triggered: bool, trail_level: float).
     """
+    if entry_price <= 0 or math.isnan(entry_price):
+        return False, 0.0
+
+    safe_atr = max(0.0, float(atr)) if (atr is not None and not math.isnan(float(atr))) else 0.0
+
     if side == "SHORT":
         gain_pct = (entry_price - lowest_price) / entry_price
         
         if gain_pct < TRAILING_STOP_ACTIVATE_PCT:
             return False, 0.0
             
-        trail_level = lowest_price + (atr * TRAILING_STOP_ATR_MULT)
+        trail_level = lowest_price + (safe_atr * TRAILING_STOP_ATR_MULT)
         trail_level = min(trail_level, entry_price * 0.999)
         
         triggered = current_price >= trail_level
@@ -249,7 +275,7 @@ def check_trailing_stop(entry_price: float, current_price: float,
         if gain_pct < TRAILING_STOP_ACTIVATE_PCT:
             return False, 0.0
     
-        trail_level = highest_price - (atr * TRAILING_STOP_ATR_MULT)
+        trail_level = highest_price - (safe_atr * TRAILING_STOP_ATR_MULT)
     
         # Trail level must be above entry to be a profit-protecting stop
         trail_level = max(trail_level, entry_price * 1.001)

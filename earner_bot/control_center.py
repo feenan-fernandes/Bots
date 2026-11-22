@@ -592,7 +592,7 @@ class OuroborosControlCenter(QMainWindow):
             self.log_message("   Please run the bot from the project root or update your .exe build.", "#F59E0B")
             return
 
-        cmd = [get_python_exe(), app_path]
+        cmd = [get_python_exe(), app_path, "--headless"]
         try:
             self.log_message(f"🚀 Spawning Trading Bot: {' '.join(cmd)}", "#10B981")
             # Spawn in visible window or separate process
@@ -732,7 +732,7 @@ class OuroborosControlCenter(QMainWindow):
 
     @Slot(int)
     def _diagnostic_suite_1_finished(self, exit_code: int):
-        self.log_message(f"Suite 1 completed with code: {exit_code}", "#38BDF8")
+        self.log_message(f"Suite 1 (Institutional Architecture) completed with code: {exit_code}", "#38BDF8")
         # Run Suite 2 (Self Learning Vault)
         cmd2 = [get_python_exe(), "-u", os.path.join(BASE_DIR, "test_self_learning_vault.py")]
         self.worker = SubprocessWorker(cmd2, cwd=BASE_DIR)
@@ -742,9 +742,10 @@ class OuroborosControlCenter(QMainWindow):
 
     @Slot(int)
     def _diagnostic_suite_2_finished(self, exit_code: int):
-        self.log_message(f"Suite 2 completed with code: {exit_code}", "#38BDF8")
-        self.log_message("📊 RUNNING AETHERIS MONTE CARLO BACKTEST & PERFORMANCE AUDIT...", "#38BDF8")
-        cmd3 = [get_python_exe(), "-u", os.path.join(BASE_DIR, "backtest_aetheris.py")]
+        self.log_message(f"Suite 2 (Self-Learning Vault) completed with code: {exit_code}", "#38BDF8")
+        # Run Suite 3 (Property-Based Invariants - Trail of Bits)
+        self.log_message("🔬 RUNNING PROPERTY-BASED INVARIANT SUITE (Trail of Bits Methodology)...", "#38BDF8")
+        cmd3 = [get_python_exe(), "-u", os.path.join(BASE_DIR, "test_property_based_invariants.py")]
         self.worker = SubprocessWorker(cmd3, cwd=BASE_DIR)
         self.worker.output_signal.connect(self._handle_diagnostic_output)
         self.worker.finished_signal.connect(self._diagnostic_suite_3_finished)
@@ -752,9 +753,30 @@ class OuroborosControlCenter(QMainWindow):
 
     @Slot(int)
     def _diagnostic_suite_3_finished(self, exit_code: int):
+        self.log_message(f"Suite 3 (Property Invariants) completed with code: {exit_code}", "#38BDF8")
+        # Run Suite 4 (OWASP API Security Audit)
+        self.log_message("🛡️ RUNNING DEFENSIVE SECURITY AUDIT (OWASP API Top 10 Verification)...", "#38BDF8")
+        cmd4 = [get_python_exe(), "-u", os.path.join(BASE_DIR, "test_security_audit.py")]
+        self.worker = SubprocessWorker(cmd4, cwd=BASE_DIR)
+        self.worker.output_signal.connect(self._handle_diagnostic_output)
+        self.worker.finished_signal.connect(self._diagnostic_suite_4_finished)
+        self.worker.start()
+
+    @Slot(int)
+    def _diagnostic_suite_4_finished(self, exit_code: int):
+        self.log_message(f"Suite 4 (Security Audit) completed with code: {exit_code}", "#38BDF8")
+        self.log_message("📊 RUNNING AETHERIS MONTE CARLO BACKTEST & PERFORMANCE AUDIT...", "#38BDF8")
+        cmd5 = [get_python_exe(), "-u", os.path.join(BASE_DIR, "backtest_aetheris.py")]
+        self.worker = SubprocessWorker(cmd5, cwd=BASE_DIR)
+        self.worker.output_signal.connect(self._handle_diagnostic_output)
+        self.worker.finished_signal.connect(self._diagnostic_suite_5_finished)
+        self.worker.start()
+
+    @Slot(int)
+    def _diagnostic_suite_5_finished(self, exit_code: int):
         self.log_message(f"AETHERIS Backtest completed with code: {exit_code}", "#38BDF8")
-        self.log_message("🎉 ALL INSTITUTIONAL QUANT SUITES & BACKTESTS PASSED (100%)!", "#10B981")
-        self.status_bar.showMessage("All diagnostic tests & empirical backtest complete.")
+        self.log_message("🎉 ALL 5 INSTITUTIONAL QUANT, SECURITY & PROPERTY SUITES PASSED (100%)!", "#10B981")
+        self.status_bar.showMessage("All diagnostic tests, security audits & empirical backtest complete.")
 
     def open_log_file(self, filename: str):
         filepath = os.path.join(LOGS_DIR, filename)

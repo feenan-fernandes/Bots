@@ -52,6 +52,24 @@ Welcome to the automated external memory vault of the Ouroboros Quantitative Tra
             with io.open(index_file, "w", encoding="utf-8") as f:
                 f.write(content)
 
+    def _safe_filename(self, trade_id: str, symbol: str) -> tuple:
+        """
+        Sanitizes trade_id and symbol to strictly prevent directory traversal attacks (CWE-22).
+        Returns (safe_filename, safe_absolute_filepath).
+        """
+        import re
+        clean_id = re.sub(r'[^A-Za-z0-9_\-]', '_', str(trade_id or 'UNKNOWN'))
+        clean_sym = re.sub(r'[^A-Za-z0-9_\-]', '_', str(symbol or 'UNKNOWN'))
+        clean_id = clean_id.replace('..', '_').strip('._')
+        clean_sym = clean_sym.replace('..', '_').strip('._')
+        if not clean_id: clean_id = "UNKNOWN"
+        if not clean_sym: clean_sym = "UNKNOWN"
+        filename = f"TRADE_{clean_id}_{clean_sym}.md"
+        filepath = os.path.abspath(os.path.join(self.trades_dir, filename))
+        if not filepath.startswith(os.path.abspath(self.trades_dir)):
+            raise ValueError(f"Security Alert: Directory traversal detected for {trade_id}")
+        return filename, filepath
+
     def record_trade_entry(self, trade_id: str, trade_data: Dict[str, Any], orderflow: Optional[Dict[str, Any]] = None) -> str:
         """
         Creates a new trade dossier note when a position opens.
@@ -70,9 +88,7 @@ Welcome to the automated external memory vault of the Ouroboros Quantitative Tra
         breakdown = trade_data.get("breakdown", {})
 
         date_str = entry_time.split("T")[0] if "T" in entry_time else datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        safe_id = trade_id.replace(":", "_").replace("-", "_")
-        filename = f"TRADE_{safe_id}_{symbol}.md"
-        filepath = os.path.join(self.trades_dir, filename)
+        filename, filepath = self._safe_filename(trade_id, symbol)
 
         of = orderflow or {}
         ofi = of.get("ofi", 0.0)
@@ -165,9 +181,7 @@ The bot captured the following microsecond order book metrics directly prior to 
         """
         Appends closing metrics, PnL, slippage, and post-mortem autopsy to the trade file.
         """
-        safe_id = trade_id.replace(":", "_").replace("-", "_")
-        filename = f"TRADE_{safe_id}_{symbol}.md"
-        filepath = os.path.join(self.trades_dir, filename)
+        filename, filepath = self._safe_filename(trade_id, symbol)
 
         exit_price = float(exit_data.get("exit_price", 0.0))
         entry_price = float(exit_data.get("entry_price", 0.0))

@@ -62,7 +62,14 @@ class PreTradeRiskEngine:
 
         # 3. Post-Execution Total Exposure Cap
         active_trades = open_trades or []
-        current_exposure = sum(float(t.get("price", 0.0)) * float(t.get("qty", 0.0)) for t in active_trades)
+        current_exposure = 0.0
+        for t in active_trades:
+            if "notional_usd" in t:
+                current_exposure += float(t["notional_usd"])
+            else:
+                p = float(t.get("price", t.get("entry_price", 0.0)))
+                q = float(t.get("qty", t.get("size", 0.0)))
+                current_exposure += p * q
         projected_exposure = current_exposure + order_notional
         if projected_exposure > self.limits.max_portfolio_exposure_usd:
             logger.warning(f"RISK REJECT: Projected exposure ${projected_exposure:.2f} exceeds cap ${self.limits.max_portfolio_exposure_usd:.2f}")
