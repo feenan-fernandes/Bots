@@ -743,11 +743,18 @@ def _evaluate_symbol_async(symbol: str, price: float = None):
                 if not trade:
                     return
                     
-                exit_trigger = check_stop_take(trade, price, current_atr)
+                from risk import check_stop_take, check_tiered_stop_take
+                exit_trigger, exit_qty = check_tiered_stop_take(trade, price, current_atr)
                 if early_reversal_trigger and not exit_trigger:
                     exit_trigger = early_reversal_trigger
+                    exit_qty = float(trade.get("size", trade.get("qty", 0.0)))
                     
-                if exit_trigger:
+                if exit_trigger == "SCALE_OUT_TP1":
+                    prices = {symbol: price}
+                    port_usd = portfolio_value_usd(balances, prices)
+                    execution_pool.submit(_execute_scale_out_tp1, trade, price, exit_qty, port_usd)
+                    return
+                elif exit_trigger:
                     prices = {symbol: price}
                     port_usd = portfolio_value_usd(balances, prices)
                     execution_pool.submit(_execute_exit, exit_trigger, trade, price, port_usd)
@@ -780,14 +787,14 @@ def _evaluate_symbol_async(symbol: str, price: float = None):
             
             if signal_result["signal"] == "BUY" and signal_result["score"] >= config.MIN_CONFLUENCE_SCORE:
                 mtf = multi_timeframe_gate(broker_binance.client, symbol)
-                if mtf == "CONFIRMED_BUY" or mtf == "MIXED":
+                if mtf == "CONFIRMED_BUY":
                     action = "EXECUTING_BUY"
                 else:
                     action = "SKIPPED_MTF"
                     reason = "mtf_direction_conflict"
             elif signal_result["signal"] == "SELL" and signal_result["score"] >= config.MIN_CONFLUENCE_SCORE:
                 mtf = multi_timeframe_gate(broker_binance.client, symbol)
-                if mtf == "CONFIRMED_SELL" or mtf == "MIXED":
+                if mtf == "CONFIRMED_SELL":
                     action = "EXECUTING_SHORT"
                 else:
                     action = "SKIPPED_MTF"
@@ -896,8 +903,49 @@ def _evaluate_symbol_async(symbol: str, price: float = None):
         logger.error(f"Eval error for {symbol}: {e}")
 
 # ═══════════════════════════════════════════════════════════════════
-#  HELPER: Execute Exit (used by stop-loss, take-profit, signal sell)
+#  HELPER: Execute Exit & Scale-Out (Two-Tier Profit Taking & Breakeven)
 # ═══════════════════════════════════════════════════════════════════
+
+def _execute_scale_out_tp1(trade: Dict, price: float, scale_qty: float, port_usd: float) -> Any:
+    """Execute Tier-1 partial profit taking (50% size) and adjust remaining position to Breakeven."""
+    qty = scale_qty
+    entry_price = trade["price"]
+    symbol = trade["symbol"]
+    side = trade.get("side", "LONG")
+
+    if side == "SHORT":
+        if config.PAPER_MODE:
+            logger.warning(f"Simulating TP1 short scale-out for {symbol} (Paper mode)")
+            order = {"paper": True, "qty": qty, "price": price, "status": "FILLED"}
+        else:
+            order = execute_buy_safe(symbol, qty)
+    else:
+        order = execute_sell_safe(symbol, qty)
+
+    if order:
+        actual_price = order.get("price", price)
+        if side == "SHORT":
+            pnl_usd = qty * (entry_price - actual_price)
+            pnl_pct = (entry_price - actual_price) / entry_price * 100.0
+        else:
+            pnl_usd = qty * (actual_price - entry_price)
+            pnl_pct = (actual_price - entry_price) / entry_price * 100.0
+
+        with trade_lock:
+            current_trade = state_mgr.get_trade(symbol)
+            if current_trade:
+                current_trade["qty"] = max(0.0, round(float(current_trade["qty"]) - qty, 6))
+                current_trade["size"] = current_trade["qty"]
+                current_trade["tp1_hit"] = True
+                if side == "SHORT":
+                    current_trade["stop_loss"] = round(entry_price * 0.9992, 4)
+                else:
+                    current_trade["stop_loss"] = round(entry_price * 1.0008, 4)
+                state_mgr.record_daily_pnl(pnl_usd)
+                state_mgr._save()
+
+        logger.info("🎉 TP1 SCALE-OUT EXECUTED for %s: 50%% (%.6f) @ $%.2f | PnL: $%+.2f (%+.2f%%) | Stop moved to Breakeven ($%.2f)",
+                    symbol, qty, actual_price, pnl_usd, pnl_pct, current_trade.get("stop_loss", 0.0) if current_trade else 0.0)
 
 def _execute_exit(trigger: str, trade: Dict, price: float, port_usd: float,
                   score: int = 0, regime: str = "", dec_id: str = "") -> Any:

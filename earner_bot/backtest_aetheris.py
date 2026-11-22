@@ -142,40 +142,74 @@ class AetherisBacktestEngine:
                 peak_equity = equity
             drawdown = (equity - peak_equity) / peak_equity
 
-            # 1. Check Exit for Active Position
+            # 1. Check Exit for Active Position (Two-Tier Scale-Out & Breakeven)
             if active_trade is not None:
                 side = active_trade["side"]
                 entry_p = active_trade["entry_price"]
                 sl = active_trade["stop_loss"]
-                tp = active_trade["take_profit"]
+                tp2 = active_trade["take_profit"]
                 qty = active_trade["quantity"]
+                tp1_hit = active_trade.get("tp1_hit", False)
 
-                hit_tp = (price >= tp if side == "BUY" else price <= tp)
+                # TP1 Target: +0.75%
+                tp1 = entry_p * (1.0 + 0.0075) if side == "BUY" else entry_p * (1.0 - 0.0075)
+
+                # Check TP1 Trigger
+                if not tp1_hit:
+                    hit_tp1 = (price >= tp1 if side == "BUY" else price <= tp1)
+                    if hit_tp1:
+                        scale_qty = qty * 0.50
+                        exit_price_net = tp1 * (1.0 - self.slippage_rate if side == "BUY" else 1.0 + self.slippage_rate)
+                        raw_pnl = (exit_price_net - entry_p) * scale_qty if side == "BUY" else (entry_p - exit_price_net) * scale_qty
+                        fees = (entry_p * scale_qty * self.fee_rate) + (exit_price_net * scale_qty * self.fee_rate)
+                        net_pnl = raw_pnl - fees
+                        equity += net_pnl
+                        
+                        # Move stop to breakeven (+0.08% fee buffer)
+                        active_trade["quantity"] = qty - scale_qty
+                        active_trade["stop_loss"] = entry_p * (1.0 + 0.0008) if side == "BUY" else entry_p * (1.0 - 0.0008)
+                        active_trade["tp1_hit"] = True
+                        active_trade["accumulated_pnl"] = net_pnl
+                        qty = active_trade["quantity"]
+                        sl = active_trade["stop_loss"]
+
+                # Check TP2 or Breakeven/SL on remaining quantity
+                hit_tp2 = (price >= tp2 if side == "BUY" else price <= tp2)
                 hit_sl = (price <= sl if side == "BUY" else price >= sl)
 
-                if hit_tp or hit_sl:
-                    exit_price = tp if hit_tp else sl
-                    # Apply slippage on exit
+                if hit_tp2 or hit_sl:
+                    exit_price = tp2 if hit_tp2 else sl
                     exit_price_net = exit_price * (1.0 - self.slippage_rate if side == "BUY" else 1.0 + self.slippage_rate)
-                    
-                    # Compute raw PnL
                     raw_pnl = (exit_price_net - entry_p) * qty if side == "BUY" else (entry_p - exit_price_net) * qty
-                    
-                    # Deduct trading fees (entry fee + exit fee)
                     fees = (entry_p * qty * self.fee_rate) + (exit_price_net * qty * self.fee_rate)
                     net_pnl = raw_pnl - fees
-
                     equity += net_pnl
-                    active_trade["exit_price"] = exit_price_net
-                    active_trade["net_pnl"] = net_pnl
-                    active_trade["pnl_pct"] = (net_pnl / (entry_p * qty)) * 100.0
-                    active_trade["reason"] = "TAKE_PROFIT" if hit_tp else "STOP_LOSS"
-                    trade_logs.append(active_trade)
 
+                    total_trade_pnl = net_pnl + active_trade.get("accumulated_pnl", 0.0)
+                    active_trade["exit_price"] = exit_price_net
+                    active_trade["net_pnl"] = total_trade_pnl
+                    initial_qty = qty * 2 if tp1_hit else qty
+                    active_trade["pnl_pct"] = (total_trade_pnl / (entry_p * initial_qty)) * 100.0
+                    active_trade["reason"] = "TAKE_PROFIT_TP2" if hit_tp2 else ("BREAKEVEN" if tp1_hit else "STOP_LOSS")
+                    trade_logs.append(active_trade)
                     active_trade = None
 
             # 2. Check Entry if No Active Position
-            elif state.signal in ["BUY", "SELL"] and state.confidence_score >= 70:
+            elif state.signal in ["BUY", "SELL"] and state.confidence_score >= 75:
+                # Order flow alignment filter (Lead-lag & OFI Confirmation)
+                ofi = event.get("ofi", 0.0)
+                futures_lead = event.get("futures_lead_pct", 0.0)
+                spread_bps = event.get("spread_bps", 0.0)
+
+                # Skip if illiquid spread > 2.5 bps
+                if spread_bps > 2.5:
+                    continue
+
+                if state.signal == "BUY" and (futures_lead < -0.005 or ofi < -0.20):
+                    continue
+                if state.signal == "SELL" and (futures_lead > 0.005 or ofi > 0.20):
+                    continue
+
                 # Calculate position size via Kelly criterion + capital tier
                 risk_per_trade = 0.015 # 1.5% capital at risk
                 dollar_risk = equity * risk_per_trade

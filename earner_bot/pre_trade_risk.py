@@ -17,6 +17,7 @@ class RiskLimits:
     max_portfolio_exposure_usd: float = 25000.0 # Max cumulative open position notional
     max_price_deviation_pct: float = 0.015    # Fat-finger collar (1.5% max distance from mid)
     max_orders_per_second: int = 20           # Leaky bucket rate-limit guard
+    max_spread_bps: float = 3.5               # Illiquid spread collar (3.5 bps)
 
 class PreTradeRiskEngine:
     def __init__(self, limits: Optional[RiskLimits] = None):
@@ -35,7 +36,8 @@ class PreTradeRiskEngine:
         daily_pnl_usd: float,
         portfolio_equity_usd: float,
         open_trades: Optional[List[Dict[str, Any]]] = None,
-        timestamp: Optional[float] = None
+        timestamp: Optional[float] = None,
+        spread_bps: Optional[float] = None
     ) -> Tuple[bool, str]:
         """
         Executes strict, deterministic O(1) in-memory checks.
@@ -44,6 +46,10 @@ class PreTradeRiskEngine:
         # 0. Basic Sanity Check
         if price <= 0 or quantity <= 0:
             return False, "INVALID_PRICE_OR_QUANTITY"
+
+        if spread_bps is not None and spread_bps > self.limits.max_spread_bps:
+            logger.warning(f"RISK REJECT: Spread {spread_bps:.2f} bps exceeds cap {self.limits.max_spread_bps:.2f} bps")
+            return False, f"SPREAD_TOO_WIDE: {spread_bps:.2f} > {self.limits.max_spread_bps:.2f} bps"
 
         order_notional = price * quantity
         now_sec = int(timestamp if timestamp is not None else time.time())

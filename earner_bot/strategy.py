@@ -162,7 +162,42 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df['Hurst_Upper'] = 0.5 + (1.5 * df['Hurst_STD'])
     df['Hurst_Lower'] = 0.5 - (1.5 * df['Hurst_STD'])
 
+    # --- Volatility Squeeze Detection (Bandwidth Compression) ---
+    df['BB_Mid'] = df['close'].rolling(20).mean()
+    df['BB_Std'] = df['close'].rolling(20).std()
+    df['BB_Upper'] = df['BB_Mid'] + 2.0 * df['BB_Std']
+    df['BB_Lower'] = df['BB_Mid'] - 2.0 * df['BB_Std']
+    df['BBW'] = (df['BB_Upper'] - df['BB_Lower']) / df['BB_Mid'].replace(0, 1e-9)
+    df['BBW_15th'] = df['BBW'].rolling(50, min_periods=20).quantile(0.15)
+    df['is_squeeze'] = df['BBW'] <= df['BBW_15th']
+
     return df.dropna()
+
+def validate_orderflow_alignment(signal: str, orderflow: Optional[Dict[str, Any]]) -> Tuple[bool, str]:
+    """Ensures real-time Level-2 queue balance and cross-venue velocity confirms candle signal."""
+    if not orderflow:
+        return True, "NO_ORDERFLOW_DATA"
+        
+    futures_lead = orderflow.get("futures_lead_pct", 0.0)
+    micro_skew = orderflow.get("micro_skew_bps", 0.0)
+    ofi = orderflow.get("ofi", 0.0)
+    
+    if signal == "BUY":
+        if futures_lead < -0.005:
+            return False, "FUTURES_LEAD_BEARISH_DIVERGENCE"
+        if ofi < -0.25:
+            return False, "HEAVY_ASK_QUEUE_ABSORPTION"
+        if micro_skew < -1.5:
+            return False, "MICRO_PRICE_SKEW_BEARISH"
+    elif signal == "SELL":
+        if futures_lead > 0.005:
+            return False, "FUTURES_LEAD_BULLISH_DIVERGENCE"
+        if ofi > 0.25:
+            return False, "HEAVY_BID_QUEUE_ABSORPTION"
+        if micro_skew > 1.5:
+            return False, "MICRO_PRICE_SKEW_BULLISH"
+            
+    return True, "ALIGNED"
 
 # =====================================================================
 # REGIME DETECTION & STRATEGY ROUTER
@@ -298,16 +333,33 @@ def get_signal(df: pd.DataFrame, regime: str, client=None, symbol: str = None, o
         return {"signal": "HOLD", "score": 0, "breakdown": {}, "regime": regime}
         
     if regime == "NOISE":
-        # In NOISE, still evaluate but require a much higher confidence threshold.
-        # This prevents the deadlock of blocking everything while still filtering weak signals.
+        # In NOISE regime, only permit trading if volatility compression indicates a breakout squeeze.
+        # Otherwise, geometric Brownian motion / random walk chops win rate.
+        last_row = df.iloc[-1]
+        is_squeeze = bool(last_row.get("is_squeeze", False))
+        if not is_squeeze:
+            return {
+                "signal": "HOLD",
+                "score": 0,
+                "breakdown": {"noise_filtered": 1},
+                "regime": regime
+            }
         signal, score, breakdown = mean_reversion_alpha(df)
-        # Only allow NOISE trades with very high conviction (score >= 70)
-        if score < 70:
+        if score < 75:
             return {"signal": "HOLD", "score": score, "breakdown": breakdown, "regime": regime}
     elif regime == "TRENDING":
         signal, score, breakdown = trend_following_alpha(df)
     else:
         signal, score, breakdown = mean_reversion_alpha(df)
+
+    # ─── Order Flow Level-2 Alignment & Cross-Venue Lead Velocity Gate ───
+    if signal in ["BUY", "SELL"] and orderflow:
+        aligned, of_reason = validate_orderflow_alignment(signal, orderflow)
+        if not aligned:
+            logger.info(f"Signal {signal} for {symbol or 'UNKNOWN'} vetoed by orderflow: {of_reason}")
+            breakdown["orderflow_veto"] = of_reason
+            signal = "HOLD"
+            score = 0
 
     # ─── AETHERIS Micro-Alpha Phase Transition Evaluation ───
     aetheris_telemetry = None

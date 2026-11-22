@@ -300,37 +300,80 @@ def check_stop_take(trade: Dict, current_price: float, current_atr: float) -> Op
     Returns trigger name or None.
     Priority: STOP_LOSS > TRAILING_STOP > TIME_EXIT > TAKE_PROFIT
     """
-    entry_price   = trade["price"]
-    stop_loss     = trade.get("stop_loss", 0)
-    take_profit   = trade.get("take_profit", float("inf") if trade.get("side", "LONG") == "LONG" else 0)
-    highest_price = trade.get("highest_price", entry_price)
-    lowest_price  = trade.get("lowest_price", entry_price)
-    atr_at_entry  = trade.get("atr_at_entry", current_atr)
+    trigger, _ = check_tiered_stop_take(trade, current_price, current_atr)
+    return trigger
+
+
+def check_tiered_stop_take(trade: Dict, current_price: float, current_atr: float) -> Tuple[Optional[str], float]:
+    """
+    Tiered Trade Management & Breakeven Protection:
+    1. Returns ("SCALE_OUT_TP1", scale_qty) when price hits TP1 (+0.75% or 1.0 * ATR).
+       - Automatically moves trade stop_loss to Breakeven (+0.08% fee buffer).
+       - Sets trade["tp1_hit"] = True.
+    2. Returns ("STOP_LOSS", remaining_qty) on Stop Loss / Breakeven hit.
+    3. Returns ("TRAILING_STOP", remaining_qty) on Trailing Stop.
+    4. Returns ("TIME_EXIT", remaining_qty) on max hold expiry.
+    5. Returns ("TAKE_PROFIT", remaining_qty) on full TP2 hit.
+    """
+    entry_price   = float(trade.get("price", trade.get("entry_price", 0.0)))
+    stop_loss     = float(trade.get("stop_loss", 0.0))
+    take_profit   = float(trade.get("take_profit", float("inf") if trade.get("side", "LONG") in ["LONG", "BUY"] else 0.0))
+    highest_price = float(trade.get("highest_price", entry_price))
+    lowest_price  = float(trade.get("lowest_price", entry_price))
+    atr_at_entry  = float(trade.get("atr_at_entry", current_atr))
     side          = trade.get("side", "LONG")
+    total_qty     = float(trade.get("qty", trade.get("size", 0.0)))
+    tp1_hit       = trade.get("tp1_hit", False)
 
-    # 1. Hard stop-loss
-    if side == "SHORT" and current_price >= stop_loss:
-        return "STOP_LOSS"
-    elif side == "LONG" and current_price <= stop_loss:
-        return "STOP_LOSS"
+    if entry_price <= 0:
+        return None, 0.0
 
-    # 2. Trailing stop
+    # 1. Hard stop-loss or Breakeven Stop
+    if side in ["SHORT", "SELL"] and current_price >= stop_loss:
+        return "STOP_LOSS", total_qty
+    elif side in ["LONG", "BUY"] and current_price <= stop_loss:
+        return "STOP_LOSS", total_qty
+
+    # 2. Tier 1 Take-Profit Scale-Out (50% size at +0.75% or 1.0x ATR)
+    if not tp1_hit:
+        if side in ["LONG", "BUY"]:
+            tp1_target = entry_price + max(atr_at_entry * 1.0, entry_price * 0.0075)
+            if current_price >= tp1_target:
+                scale_qty = round(total_qty * 0.50, 6)
+                # Elevate stop-loss to Breakeven (+0.08% fee buffer)
+                trade["stop_loss"] = round(entry_price * 1.0008, 4)
+                trade["tp1_hit"] = True
+                logger.info("TP1 HIT for %s: scaling out %.6f @ $%.2f. Stop moved to Breakeven ($%.2f)",
+                            trade.get('symbol', 'UNKNOWN'), scale_qty, current_price, trade["stop_loss"])
+                return "SCALE_OUT_TP1", scale_qty
+        else:
+            tp1_target = entry_price - max(atr_at_entry * 1.0, entry_price * 0.0075)
+            if current_price <= tp1_target:
+                scale_qty = round(total_qty * 0.50, 6)
+                # Lower stop-loss to Breakeven (-0.08% fee buffer)
+                trade["stop_loss"] = round(entry_price * 0.9992, 4)
+                trade["tp1_hit"] = True
+                logger.info("TP1 HIT for %s: scaling out %.6f @ $%.2f. Stop moved to Breakeven ($%.2f)",
+                            trade.get('symbol', 'UNKNOWN'), scale_qty, current_price, trade["stop_loss"])
+                return "SCALE_OUT_TP1", scale_qty
+
+    # 3. Trailing stop
     triggered, _ = check_trailing_stop(entry_price, current_price,
                                        highest_price, lowest_price, atr_at_entry, side)
     if triggered:
-        return "TRAILING_STOP"
+        return "TRAILING_STOP", total_qty
 
-    # 3. Time-based exit
+    # 4. Time-based exit
     if check_time_exit(trade.get("entry_time", "")):
-        return "TIME_EXIT"
+        return "TIME_EXIT", total_qty
 
-    # 4. Take-profit
-    if side == "SHORT" and current_price <= take_profit:
-        return "TAKE_PROFIT"
-    elif side == "LONG" and current_price >= take_profit:
-        return "TAKE_PROFIT"
+    # 5. Take-profit TP2 (Final Cavitation Horizon)
+    if side in ["SHORT", "SELL"] and current_price <= take_profit:
+        return "TAKE_PROFIT", total_qty
+    elif side in ["LONG", "BUY"] and current_price >= take_profit:
+        return "TAKE_PROFIT", total_qty
 
-    return None
+    return None, 0.0
 
 
 def check_fee_viability(entry_price: float, take_profit: float, side: str, min_distance_pct: float = 0.0012) -> bool:
